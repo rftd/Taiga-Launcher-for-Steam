@@ -1273,5 +1273,7 @@
   "sync.noFile": "Die Datei von {title} wurde nicht gefunden. Prüfe, ob das Laufwerk verbunden ist, oder gib den neuen Ort an.",
   "sync.noEmu": "Der Emulator von {title} ({emu}) ist nicht eingerichtet. Öffne Emulatoren und gib an, wo er liegt.",
   "sync.review": "Prüfe, wie {title} starten soll (Startkonfiguration), bevor du es zu Steam hinzufügst.",
-  "sync.cantRun": "{title} kann noch nicht gestartet werden. Prüfe die Startkonfiguration."
+  "sync.cantRun": "{title} kann noch nicht gestartet werden. Prüfe die Startkonfiguration.",
+ "boot.linuxLabel":"Bei der Anmeldung starten",
+ "boot.linuxHint":"Nach der Anmeldung minimiert öffnen."
 }

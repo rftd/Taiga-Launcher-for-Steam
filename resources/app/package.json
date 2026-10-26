@@ -11,13 +11,17 @@
     "start": "electron .",
     "test": "node --env-file=tests/test.env --test tests/*.test.mjs",
     "dev:service": "node server.mjs",
-    "build:locales": "node tools/build-locales.mjs"
+    "build:locales": "node tools/build-locales.mjs",
+    "build:desktop": "node ../../tools/build-desktop.mjs",
+    "build:appimage": "node ../../tools/build-appimage.mjs"
   },
   "main": "desktop/main.cjs",
   "productName": "TaigaSteam",
   "description": "Taiga Launcher, jogos de emulador, de PC e ports de console na Biblioteca Steam",
   "devDependencies": {
-    "electron": "44.7.1"
+    "electron": "44.7.1",
+    "@electron/packager": "19.0.1",
+    "electron-builder": "26.0.12"
   },
   "taigaUpdates": "GabrielTaiga/taiga-launcher",
   "taigaDiscord": "",

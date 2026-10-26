@@ -1,26 +1,29 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import * as linux from './linux.mjs';
 import {execFile,spawn} from 'node:child_process';
 import {promisify} from 'node:util';
 import {fileURLToPath} from 'node:url';
 const run=promisify(execFile),here=path.dirname(fileURLToPath(import.meta.url));
 export async function ps(code){if(process.platform!=='win32')throw Error('Esta operação requer Windows.');const {stdout}=await run('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(code,'utf16le').toString('base64')],{windowsHide:true,maxBuffer:4*1024*1024});return stdout.trim();}
-export async function detectSteam(){try{return await ps("(Get-ItemProperty 'HKCU:\\Software\\Valve\\Steam').SteamPath");}catch{return '';}}
-export async function steamLocation(selected){let target=selected;if(path.extname(selected).toLowerCase()==='.lnk'){const literal=selected.replaceAll("'","''");target=await ps("(New-Object -ComObject WScript.Shell).CreateShortcut('"+literal+"').TargetPath");}if(fs.existsSync(target)&&fs.statSync(target).isDirectory())return target;if(path.basename(target).toLowerCase()!=='steam.exe')throw Error('Selecione a pasta da Steam, steam.exe ou um atalho para steam.exe.');return path.dirname(target);}
-export async function running(){if(process.platform!=='win32')return false;return (await ps("if(Get-Process steam -ErrorAction SilentlyContinue){'yes'}else{'no'}"))==='yes';}
+export async function detectSteam(){if(process.platform==='linux')return linux.detectSteam();try{return await ps("(Get-ItemProperty 'HKCU:\\Software\\Valve\\Steam').SteamPath");}catch{return '';}}
+export async function steamLocation(selected){if(process.platform==='linux'){if(fs.existsSync(selected)&&fs.statSync(selected).isDirectory())return selected;if(['steam','steam.sh'].includes(path.basename(selected)))return await detectSteam()||path.dirname(selected);throw Error('Selecione a pasta de dados da Steam ou steam.sh.');}let target=selected;if(path.extname(selected).toLowerCase()==='.lnk'){const literal=selected.replaceAll("'","''");target=await ps("(New-Object -ComObject WScript.Shell).CreateShortcut('"+literal+"').TargetPath");}if(fs.existsSync(target)&&fs.statSync(target).isDirectory())return target;if(path.basename(target).toLowerCase()!=='steam.exe')throw Error('Selecione a pasta da Steam, steam.exe ou um atalho para steam.exe.');return path.dirname(target);}
+export async function running(){if(process.platform==='linux')return linux.processes().some(p=>p.name==='steam');if(process.platform!=='win32')return false;return (await ps("if(Get-Process steam -ErrorAction SilentlyContinue){'yes'}else{'no'}"))==='yes';}
 export async function stopSteam(dir){
  if(!await running())return;
- await run(path.join(dir,'steam.exe'),['-shutdown'],{windowsHide:true,timeout:15000}).catch(()=>{});
+ const command=process.platform==='linux'?linux.steamCommand(dir,['-shutdown']):{exe:path.join(dir,'steam.exe'),args:['-shutdown']};
+ await run(command.exe,command.args,{windowsHide:true,timeout:15000}).catch(()=>{});
  const deadline=Date.now()+45000;while(Date.now()<deadline){if(!await running()){
   // A porta de depuração pertence ao steamwebhelper: espera ele fechar também, senão a Steam nova não consegue abri-la.
+  if(process.platform==='linux')return;
   const helperDeadline=Date.now()+12000;while(Date.now()<helperDeadline&&(await ps("if(Get-Process steamwebhelper -ErrorAction SilentlyContinue){'yes'}else{'no'}").catch(()=>'no'))==='yes')await new Promise(r=>setTimeout(r,500));
   return;}await new Promise(r=>setTimeout(r,500));}
  throw Error('A Steam ainda está aberta. Encerre normalmente pelo menu Steam > Sair e tente novamente.');
 }
 // A Steam é aberta com a depuração do CEF para o injetor do Taiga Launcher (mesmos argumentos do SFP).
-export function startSteam(dir,port=8080){const p=spawn(path.join(dir,'steam.exe'),['-cef-enable-debugging','-devtools-port',String(port)],{detached:true,stdio:'ignore',windowsHide:true});p.on('error',()=>{});p.unref();}
+export function startSteam(dir,port=8080){if(process.platform==='linux')return linux.startSteam(dir,port);const p=spawn(path.join(dir,'steam.exe'),['-cef-enable-debugging','-devtools-port',String(port)],{detached:true,stdio:'ignore',windowsHide:true});p.on('error',()=>{});p.unref();}
 // Linha de comando da Steam em execução (para saber se já está com a integração ativa).
-export async function steamCommandLine(){if(process.platform!=='win32')return null;try{return await ps("(Get-CimInstance Win32_Process -Filter \"name='steam.exe'\" | Select-Object -First 1 -ExpandProperty CommandLine)")||'';}catch{return null;}}
+export async function steamCommandLine(){if(process.platform==='linux')return linux.processes().find(p=>p.name==='steam')?.args.join(' ')||'';if(process.platform!=='win32')return null;try{return await ps("(Get-CimInstance Win32_Process -Filter \"name='steam.exe'\" | Select-Object -First 1 -ExpandProperty CommandLine)")||'';}catch{return null;}}
 // Inicialização com o Windows: acrescenta os argumentos da integração à entrada "Steam" de HKCU\...\Run.
 const RUN_KEY='HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run';
 export async function steamAutostart(dir,{enable=null,port=8080}={}){
@@ -47,8 +50,10 @@ export function accounts(dir){const file=path.join(dir,'config','loginusers.vdf'
  list.push({id,steamId:m[1],name,avatar:avatarFile(dir,m[1])?'/api/avatar?id='+id:null,recent:/"MostRecent"\s+"1"/.test(m[2])});
  }return list;
 }
-export async function activeAccount(){try{const id=await ps("(Get-ItemProperty 'HKCU:\\Software\\Valve\\Steam\\ActiveProcess' -ErrorAction Stop).ActiveUser");return /^\d+$/.test(id)&&id!=='0'?id:null;}catch{return null;}}
+export async function activeAccount(dir){if(process.platform==='linux'){return accounts(dir||await detectSteam()).find(a=>a.recent)?.id||null;}try{const id=await ps("(Get-ItemProperty 'HKCU:\\Software\\Valve\\Steam\\ActiveProcess' -ErrorAction Stop).ActiveUser");return /^\d+$/.test(id)&&id!=='0'?id:null;}catch{return null;}}
 
 export function avatarFile(dir,steamId){if(!/^\d{17}$/.test(steamId))return null;for(const base of ['config/avatarcache','appcache/avatarcache'])for(const ext of ['png','jpg','jpeg']){const file=path.join(dir,base,steamId+'.'+ext);try{const stat=fs.statSync(file);if(stat.isFile()&&stat.size<4*1024*1024)return file;}catch{}}return null;}
 // Conta Epic do jogo aberto pelo launcher da Epic: ele recebe "-epicuserid=<id>" na linha de comando.
 export async function epicUserFromProcesses(){if(process.platform!=='win32')return null;try{const out=await ps("Get-CimInstance Win32_Process -Filter \"CommandLine like '%-epicuserid=%'\" | Select-Object -First 5 -ExpandProperty CommandLine");const m=String(out||'').match(/-epicuserid=([0-9a-f]{32})\b/i);return m?m[1].toLowerCase():null;}catch{return null;}}
+
+export function steamInstalled(dir){if(process.platform==='linux')return linux.steamInstalled(dir);try{return fs.statSync(path.join(dir,'steam.exe')).isFile();}catch{return false;}}

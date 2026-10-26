@@ -1273,5 +1273,7 @@
   "sync.noFile": "{title}'s file was not found. Check that the drive is connected or point to its new location.",
   "sync.noEmu": "{title}'s emulator ({emu}) is not set up. Open Emulators and show where it is.",
   "sync.review": "Check how {title} should launch (Launch configuration) before adding it to Steam.",
-  "sync.cantRun": "{title} can't be launched yet. Check Launch configuration."
+  "sync.cantRun": "{title} can't be launched yet. Check Launch configuration.",
+ "boot.linuxLabel":"Start at login",
+ "boot.linuxHint":"Open minimized when you sign in."
 }

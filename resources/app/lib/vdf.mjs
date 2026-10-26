@@ -36,6 +36,6 @@ export function upsert(root,game,exe,startDir,icon=''){
  list.forEach((n,i)=>n.key=String(i));return id;
 }
 // Accept slash/case differences and extra PPSSPP flags without creating another shortcut.
-export const windowsPath=s=>String(s||'').replace(/^"|"$/g,'').replaceAll('/','\\').replace(/\\+/g,'\\').toLowerCase();
+export const windowsPath=s=>{const value=String(s||'').replace(/^"|"$/g,'');return process.platform==='win32'||/^(?:[a-z]:[\\/]|\\\\)/i.test(value)?value.replaceAll('/','\\').replace(/\\+/g,'\\').toLowerCase():value;};
 export function launchGamePath(options){const s=String(options||'').trim();const quoted=[...s.matchAll(/"([^"\r\n]+\.(?:iso|cso|pbp))"/ig)];if(quoted.length===1)return quoted[0][1];if(/\.(iso|cso|pbp)$/i.test(s)&&!s.startsWith('-'))return s;return '';}
 export function shortcutInfo(root){return shortcuts(root).filter(n=>n.type===0).map(n=>{const b=value(n.value,'appid');return {appId:Buffer.isBuffer(b)&&b.length===4?b.readUInt32LE(0):null,title:String(value(n.value,'AppName')||''),exe:String(value(n.value,'exe')||''),options:String(value(n.value,'LaunchOptions')||''),path:launchGamePath(value(n.value,'LaunchOptions')),node:n};});}

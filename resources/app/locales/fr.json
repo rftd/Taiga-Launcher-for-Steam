@@ -1273,5 +1273,7 @@
   "sync.noFile": "Le fichier de {title} est introuvable. Vérifiez que le disque est branché ou indiquez son nouvel emplacement.",
   "sync.noEmu": "L’émulateur de {title} ({emu}) n’est pas configuré. Ouvrez Émulateurs et indiquez où il se trouve.",
   "sync.review": "Vérifiez comment {title} doit se lancer (Configuration du lancement) avant de l’ajouter à Steam.",
-  "sync.cantRun": "{title} ne peut pas encore être lancé. Vérifiez la Configuration du lancement."
+  "sync.cantRun": "{title} ne peut pas encore être lancé. Vérifiez la Configuration du lancement.",
+ "boot.linuxLabel":"Démarrer à la connexion",
+ "boot.linuxHint":"Ouvrir en mode réduit à la connexion."
 }

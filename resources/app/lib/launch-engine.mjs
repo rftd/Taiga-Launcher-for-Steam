@@ -1,11 +1,12 @@
 import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import crypto from 'node:crypto';import {spawn,execFile} from 'node:child_process';import {promisify} from 'node:util';import {performance} from 'node:perf_hooks';
+import {windowsPath} from './vdf.mjs';
 import {json,save} from './files.mjs';import {launchFor} from './games.mjs';
 import {repairLaunch} from './repair-service.mjs';
 const exec=promisify(execFile),pause=ms=>new Promise(r=>setTimeout(r,ms));
 export const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 // Pasta de dados: %LOCALAPPDATA%\Taiga Launcher. Instalações antigas (TaigaSteamPSP) são renomeadas sozinhas na
 // primeira abertura; se o Windows não deixar (pasta em uso), continua usando a antiga.
-export function defaultDataDir(){if(process.env.TAIGA_DATA)return process.env.TAIGA_DATA;const base=process.env.LOCALAPPDATA||os.homedir(),now=path.join(base,'Taiga Launcher'),old=path.join(base,'TaigaSteamPSP');
+export function defaultDataDir(){if(process.env.TAIGA_DATA)return process.env.TAIGA_DATA;if(process.platform==='linux'&&!process.env.LOCALAPPDATA){const legacy=path.join(os.homedir(),'Taiga Launcher');if(fs.existsSync(legacy))return legacy;return path.join(process.env.XDG_DATA_HOME||path.join(os.homedir(),'.local/share'),'taiga-launcher');}const base=process.env.LOCALAPPDATA||os.homedir(),now=path.join(base,'Taiga Launcher'),old=path.join(base,'TaigaSteamPSP');
  try{if(!fs.existsSync(now)&&fs.existsSync(old))fs.renameSync(old,now);}catch{return old;}return fs.existsSync(now)||!fs.existsSync(old)?now:old;}
 export function splitArguments(text){
  if(/[\r\n\0]/.test(text))throw Error('Argumentos inválidos.');const result=[];let word='',quoted=false,started=false;
@@ -22,9 +23,9 @@ export async function shellStart(exe,args,cwd){
  const code="$ErrorActionPreference='Stop';$p=@{FilePath="+q(exe)+";WorkingDirectory="+q(cwd)+";PassThru=$true};"+(String(args||'').trim()?"$p.ArgumentList="+q(args)+";":"")+"$x=Start-Process @p;[Console]::Out.Write($x.Id)";
  const {stdout}=await exec('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(code,'utf16le').toString('base64')],{windowsHide:true,timeout:60000});
  const pid=Number(String(stdout).trim());return Number.isInteger(pid)&&pid>0?pid:null;}
-const within=(file,dir)=>{try{const a=path.resolve(String(file)).toLowerCase(),b=path.resolve(String(dir)).toLowerCase();return a===b||a.startsWith(b.endsWith(path.sep)?b:b+path.sep)||a.startsWith(b+'\\')||a.startsWith(b+'/');}catch{return false;}};
+const within=(file,dir)=>{try{const a=windowsPath(path.resolve(String(file))),b=windowsPath(path.resolve(String(dir)));return a===b||a.startsWith(b.endsWith(path.sep)?b:b+path.sep)||a.startsWith(b+'\\')||a.startsWith(b+'/');}catch{return false;}};
 // Pastas do jogo para reconhecer o processo dele quando quem abriu foi outro programa (loja, iniciador, Explorer).
-function gameDirs(game){if(!['pc','store','custom'].includes(game.profile||'psp'))return [];const out=[];for(const d of [game.gameRoot,game.path&&path.dirname(game.path)]){if(!d)continue;const r=path.resolve(String(d));if(r.split(/[\\/]/).filter(Boolean).length<2)continue;if(/[\\/](windows|program files( \(x86\))?|programdata)$/i.test(r))continue;if(!out.some(x=>x.toLowerCase()===r.toLowerCase()))out.push(r);}return out;}
+function gameDirs(game){if(!['pc','store','custom'].includes(game.profile||'psp'))return [];const out=[];for(const d of [game.gameRoot,game.path&&path.dirname(game.path)]){if(!d)continue;const r=path.resolve(String(d));if(r.split(/[\\/]/).filter(Boolean).length<2)continue;if(/[\\/](windows|program files( \(x86\))?|programdata)$/i.test(r))continue;if(!out.some(x=>windowsPath(x)===windowsPath(r)))out.push(r);}return out;}
 export const processAlive=pid=>{if(!Number.isInteger(pid)||pid<=0)return false;try{process.kill(pid,0);return true;}catch(e){return e.code==='EPERM';}};
 export async function processSnapshot(){
  if(process.platform==='win32'){const code="[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new(); @(Get-CimInstance Win32_Process | Select-Object @{n='pid';e={$_.ProcessId}},@{n='ppid';e={$_.ParentProcessId}},@{n='born';e={([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds()}},@{n='exe';e={$_.ExecutablePath}},@{n='name';e={$_.Name}}) | ConvertTo-Json -Compress";const {stdout}=await exec('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(code,'utf16le').toString('base64')],{windowsHide:true,timeout:10000,maxBuffer:4*1024*1024});const rows=JSON.parse(stdout.trim()||'[]');return Array.isArray(rows)?rows:[rows];}
@@ -64,7 +65,7 @@ export class LaunchEngine{
    if(viaShell)record.via='shell';this.store.write(record);let emptyAt=null,failures=0,adopted=0;
    // Lojas e iniciadores que abrem o jogo e fecham (Epic, Riot, "Play ..."), ou abertura pelo Windows: espera o
    // processo do jogo aparecer na pasta dele e passa a acompanhá-lo (tempo de jogo e Steam "jogando" corretos).
-   const watchUntil=()=>{if((game.profile==='store'||viaShell)&&dirs.length+(viaShell?1:0))return spawnAt+90000;if(game.profile==='custom'&&dirs.length&&path.resolve(launch.exe).toLowerCase()!==path.resolve(String(game.path||'')).toLowerCase()&&record.rootExitedAt&&record.rootExitedAt-spawnAt<15000)return record.rootExitedAt+45000;return 0;};
+   const watchUntil=()=>{if((game.profile==='store'||viaShell)&&dirs.length+(viaShell?1:0))return spawnAt+90000;if(game.profile==='custom'&&dirs.length&&windowsPath(path.resolve(launch.exe))!==windowsPath(path.resolve(String(game.path||'')))&&record.rootExitedAt&&record.rootExitedAt-spawnAt<15000)return record.rootExitedAt+45000;return 0;};
    for(;;){let rows;try{rows=await this.snapshot();failures=0;}catch{failures++;record.warning='PROCESS_SNAPSHOT_FAILED';rows=[...tracked].filter(([pid])=>processAlive(pid)).map(([pid,p])=>({pid,ppid:0,born:p.born}));}
     const present=new Map(rows.map(r=>[r.pid,r]));for(const [pid,known]of tracked){const row=present.get(pid);if(row&&!(pid===child.pid&&record.rootExitedAt&&process.platform==='win32'&&row.born>record.rootExitedAt)&&(known.born===null||row.born===known.born)){known.born=row.born;known.endedAt=null;}else known.endedAt??=Date.now();}
     let found=true;while(found){found=false;for(const row of rows){if(tracked.has(row.pid)||!tracked.has(row.ppid))continue;const parent=tracked.get(row.ppid);if(parent.endedAt!==null&&process.platform==='win32'&&row.born>parent.endedAt)continue;tracked.set(row.pid,{born:row.born,endedAt:null});found=true;}}

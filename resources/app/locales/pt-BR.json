@@ -1273,5 +1273,7 @@
   "sync.noFile": "O arquivo de {title} não foi encontrado. Confira se o disco está conectado ou indique o novo local.",
   "sync.noEmu": "O emulador de {title} ({emu}) não foi configurado. Abra Emuladores e indique onde ele está.",
   "sync.review": "Confira como {title} deve abrir (Como executar) antes de adicionar à Steam.",
-  "sync.cantRun": "{title} ainda não pode ser aberto. Confira Como executar."
+  "sync.cantRun": "{title} ainda não pode ser aberto. Confira Como executar.",
+ "boot.linuxLabel":"Iniciar com o sistema",
+ "boot.linuxHint":"Abrir minimizado ao entrar na sessão."
 }

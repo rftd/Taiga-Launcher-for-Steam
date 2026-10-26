@@ -139,6 +139,8 @@ PPSSPP, PCSX2, DuckStation, ePSXe, RPCS3, Vita3K, shadPS4, Dolphin, Cemu, Ryujin
 
 ## 📥 Install
 
+**Linux (x86_64):** AppImage build and native/Flatpak Steam setup are documented in [Linux support](docs/LINUX.md). Real Steam integration on Linux still needs desktop validation.
+
 1. Download the `.zip` from the **[latest release](https://github.com/GabrielTaiga/Taiga-Launcher-for-Steam/releases/tag/v2.3.13)**.
 2. Extract the whole folder wherever you like (for example `C:\Games\Taiga Launcher`). Keep the `.exe` together with the other files.
 3. Open **Taiga Launcher.exe**. A short setup asks for your language, your Steam account and where your games are.

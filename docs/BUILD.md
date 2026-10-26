@@ -13,6 +13,8 @@ O repositório guarda o código. O programa de cada Release é o código mais os
 | `tools/` | Build helpers |
 | `docs/` | README images and this file |
 
+For the Linux AppImage and the shared Windows/Linux build commands, see [LINUX.md](LINUX.md). The manual steps below describe the original Windows release.
+
 ## Requirements
 
 - Node.js 22 or newer

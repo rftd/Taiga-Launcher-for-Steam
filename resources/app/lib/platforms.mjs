@@ -58,6 +58,7 @@ export const PLATFORMS = [
  P('msx', 'MSX', 'MSX', 27, 29, 'Microsoft - MSX', {family: 'microsoft', aliases: ['msx', 'msx1', 'msx2', 'msx 2'], ext: ['mx1', 'mx2'], profiles: ['ares', 'retroarch'], dat: [['no-intro', 'Microsoft - MSX']], hash: 'whole'}),
  P('3do', '3DO Interactive Multiplayer', '3DO', 50, 43, 'The 3DO Company - 3DO', {family: 'other', aliases: ['3do', 'panasonic 3do'], ext: [], profiles: ['retroarch']}),
  P('dos', 'DOS', 'DOS', 13, null, 'DOS', {family: 'pc', aliases: ['dos', 'msdos', 'ms dos', 'dosbox', 'pc dos', 'exodos'], ext: [], profiles: ['dosbox', 'retroarch']}),
+ P('linux', 'Linux', 'Linux', 3, null, null, {family: 'pc', aliases: [], ext: ['appimage'], profiles: ['pc']}),
  P('pc', 'PC (Microsoft Windows)', 'PC', 6, null, null, {family: 'pc', aliases: [], ext: ['exe'], profiles: ['pc']}),
 ];
 

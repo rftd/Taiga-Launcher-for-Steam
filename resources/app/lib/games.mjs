@@ -1,5 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {nativeExecutable} from './linux.mjs';
+import {windowsPath} from './vdf.mjs';
 import {digest} from './files.mjs';
 import {executableTitle} from './executable-title.mjs';
 import {inspectPSP,parseSFO,reader,isoFile} from './psp.mjs';
@@ -19,8 +21,9 @@ export function profileForPlatform(key){const p=platformByKey(key);for(const pro
 function applyPlatform(info,key,source){const p=platformByKey(key);if(!p)return;info.platformKey=p.key;info.platformName=p.name;info.platformSource=source;if(!info.profileLocked)info.profile=profileForPlatform(p.key);}
 export function inspectGame(input){
  const file=fs.realpathSync(input),st=fs.statSync(file),ext=path.extname(file).slice(1).toLowerCase(),base=path.basename(file),upper=base.toUpperCase();
+ const native=process.platform==='linux'&&nativeExecutable(file);
  const folder=platformFromPath(file),archive=ARCHIVE_EXT.includes(ext);
- if(!st.isFile()||!st.size||(!EXTENSIONS.includes(ext)&&upper!=='EBOOT.BIN'&&!(archive&&folder)))throw Error('Formato não suportado ou arquivo vazio.');
+ if(!st.isFile()||!st.size||(!native&&!EXTENSIONS.includes(ext)&&upper!=='EBOOT.BIN'&&!(archive&&folder)))throw Error('Formato não suportado ou arquivo vazio.');
  const name=parseRomName(file);
  let pbpPS1=false;
  if(['iso','cso','pbp'].includes(ext)){try{const psp=inspectPSP(file);return {...psp,profile:'psp',platformName:PROFILES.psp.platform,platformKey:'psp',platformSource:'header',serial:normalizeSerial(psp.discId),fileTitle:name.title,region:name.regions,languages:name.languages,discNumber:name.disc};}catch(e){if(ext==='pbp'&&/PS1/.test(e.message))pbpPS1=true;else if(ext==='cso'&&/CISO v1|CSO inválido|Bloco CSO/.test(e.message))throw e;}}
@@ -28,7 +31,8 @@ export function inspectGame(input){
  const info={profile:'custom',platformName:'Não informada',platformKey:null,platformSource:null};
  if(pbpPS1)applyPlatform(info,'ps1','header');
  let title=name.title||path.basename(file,path.extname(file)),discId='',serial=name.serial||'';
- if(ext==='exe'){
+ if(native){info.profile='pc';info.profileLocked=true;info.platformName='Linux';info.platformKey='linux';info.platformSource='header';title=cleanPCTitle(path.basename(file,path.extname(file)))||title;}
+ else if(ext==='exe'){
   info.profile='pc';info.profileLocked=true;info.platformName=PROFILES.pc.platform;info.platformKey='pc';info.platformSource='extension';
   if(folder?.platform.key==='dos'){info.profileLocked=false;applyPlatform(info,'dos','folder');}
   const product=executableTitle(file);
@@ -76,7 +80,7 @@ export function inspectGame(input){
  if(info.platformName==='Não informada'&&PROFILES[info.profile])info.platformName=PROFILES[info.profile].platform;
  if(!serial&&discId)serial=normalizeSerial(discId);
  delete info.profileLocked;
- return {id:digest(file.toLowerCase()).slice(0,20),path:file,title:title||'Jogo',bytes:st.size,sizeBasis:['pc','ps3','vita3k','shadps4'].includes(info.profile)?'Tamanho do arquivo executável selecionado; não representa a instalação completa.':null,mtime:st.mtimeMs,profile:info.profile,platformName:info.platformName,platformKey:info.platformKey,platformSource:info.platformSource,discId,serial,internalTitle,identitySource,revision,fileTitle:name.title,region:name.regions,languages:name.languages,discNumber:name.disc,needsReview:info.profile==='custom',art:{}};
+ return {id:digest(windowsPath(file)).slice(0,20),path:file,title:title||'Jogo',bytes:st.size,sizeBasis:['pc','ps3','vita3k','shadps4'].includes(info.profile)?'Tamanho do arquivo executável selecionado; não representa a instalação completa.':null,mtime:st.mtimeMs,profile:info.profile,platformName:info.platformName,platformKey:info.platformKey,platformSource:info.platformSource,discId,serial,internalTitle,identitySource,revision,fileTitle:name.title,region:name.regions,languages:name.languages,discNumber:name.disc,needsReview:info.profile==='custom',art:{}};
 }
 // Discovery excludes helpers; identity resolution decides which candidates can be imported automatically.
 const AUX_EXE=/^(?:unins\d*|uninstall.*|setup.*|install.*|update.*|patcher.*|vcredist.*|vc_redist.*|dxsetup|dxwebsetup|crash.*|unitycrashhandler.*|ue4prereq.*|dotnet.*|report.*|cef.*|chrome.*|notification.*|service.*|helper.*|7z.*|ffmpeg.*|python.*|node|steam|steamservice|steamwebhelper|ppsspp.*|rpcs3.*|pcsx2.*|duckstation.*|dolphin.*|retroarch.*|cemu.*|xenia.*|mgba.*|melonds.*|vita3k.*|shadps4.*|ryujinx.*|yuzu.*|citron.*|eden.*|sudachi.*|azahar.*|lime3ds.*|citra.*|flycast.*|redream.*|xemu.*|mesen.*|snes9x.*|project64.*|mame.*|dosbox.*|emuhawk.*|ares.*)\.exe$/i;
@@ -101,7 +105,7 @@ export function scanGames(root,errors=[]){
    for(const name of fs.readdirSync(p)){if(AUX_DIR.test(name))continue;if(visited>=30000){errors.push({file:p,message:'Limite de leitura atingido. Escolha uma pasta menor para ver os demais candidatos.'});break;}try{walk(path.join(p,name),depth+1);}catch(e){if(errors.length<100)errors.push({file:path.join(p,name),message:e.message});}}}
   else{const ext=path.extname(p).slice(1).toLowerCase();if(ext==='pkg'){if(errors.length<100)errors.push({file:p,message:'Pacote de instalação: instale no emulador e importe a pasta instalada. PKG não é um executável do jogo.'});return;}
    if(ARCHIVE_EXT.includes(ext)){const folder=ext==='zip'?platformFromPath(p)?.platform:null;if(folder&&(folder.key==='arcade'||folder.hash&&!['psp','ps1','ps2','segacd','saturn'].includes(folder.hash)))out.push(p);return;}
-   if(!EXTENSIONS.includes(ext))return;
+   if(!EXTENSIONS.includes(ext)&&!(process.platform==='linux'&&nativeExecutable(p)))return;
    if(GENERIC_EXT.has(ext)){const folder=platformFromPath(p)?.platform;if(!folder||!folder.ext.includes(ext)&&!(ext==='img'&&folder.dat.some(d=>d[0]==='redump')))return;}
    if(depth>0&&ext==='bin'&&path.basename(p).toUpperCase()!=='EBOOT.BIN'){const folder=platformFromPath(p);if(!folder||!CARTRIDGE_BIN.has(folder.platform.key))return;}
    if(depth>0&&ext==='exe'&&auxiliaryExecutable(p))return;out.push(p);}
@@ -157,7 +161,7 @@ export function measureGameFolder(input){
 export function launchFor(g,config,demoExecutable){
  if(g.demo)return {exe:demoExecutable,args:'--taiga-demo '+g.id};
  const profile=g.profile||'psp';if(!PROFILES[profile])throw Error('Perfil de execução inválido.');
- if(profile==='pc'){if(!/\.exe$/i.test(g.path))throw Error('Um jogo Windows precisa de um arquivo .exe.');return {exe:g.path,args:g.launch?.args||''};}
+ if(profile==='pc'){if(process.platform==='linux'&&nativeExecutable(g.path))return {exe:g.path,args:g.launch?.args||''};if(!/\.exe$/i.test(g.path))throw Error('Selecione um executável compatível com o sistema.');return {exe:g.path,args:g.launch?.args||''};}
  // Jogos de lojas que exigem o próprio iniciador (Epic gerenciado, Ubisoft, Amazon): abre o link da loja.
  if(profile==='store'){const exe=g.launch?.exe;if(!exe||!fs.existsSync(exe))throw Error('Iniciador da loja não encontrado para '+g.title);const args=String(g.launch?.args||'');if(/[\r\n\0"]/.test(args))throw Error('Link da loja inválido.');
   // Riot Client: argumentos de produto (não é um link). Xbox: shell:AppsFolder\<família>!<app>.
