@@ -29,7 +29,7 @@ export class SteamInjector {
   Object.assign(this, {port, ports, scripts, fetchImpl, WebSocketImpl, log, interval, enabled, kindOf, host, onCall, refreshExpression, version, health, verifyEvery});
   this.lastVerify = Date.now(); this.failures = new Map();
   this.calls = 0; this.lastCallError = '';
-  this.ws = null; this.nextId = 1; this.pending = new Map(); this.sessions = new Map(); this.kinds = new Map(); this.injected = new Map();
+  this.ws = null; this.nextId = 1; this.pending = new Map(); this.sessions = new Map(); this.kinds = new Map(); this.injected = new Map(); this.ensuring = new Map();
   this.lastError = ''; this.connecting = null; this.timer = null; this.checks = new Map(); this.generation = 0;
  }
  start() { if (this.timer) return; this.tick(); this.timer = setInterval(() => this.tick(), this.interval); this.timer.unref?.(); }
@@ -128,6 +128,12 @@ export class SteamInjector {
   this.schedule(info.targetId, 300);
  }
  async ensure(targetId) {
+  // A slow CDP reply can overlap the next poll; coalesce checks for the same window.
+  if (this.ensuring.has(targetId)) return this.ensuring.get(targetId);
+  const pending = this.ensureTarget(targetId); this.ensuring.set(targetId, pending);
+  try { return await pending; } finally { if (this.ensuring.get(targetId) === pending) this.ensuring.delete(targetId); }
+ }
+ async ensureTarget(targetId) {
   const sessionId = this.sessions.get(targetId), kind = this.kinds.get(targetId);
   if (!sessionId || !kind) return false;
   // A marca leva a versão: depois de atualizar o Taiga Launcher, a Steam já aberta recebe o script novo.

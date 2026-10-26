@@ -53,7 +53,7 @@ test('Live add never creates a second shortcut: same-name shortcut is reused, ar
  const a=JSON.parse(await fn({appid:2915423711,artOnly:true,art:[{type:1,ext:'png',b64:'AA=='}]},''));assert.equal(a.ok,true);assert.ok(calls.includes('art1'));
 });
 
-test('Injector re-injects a window whose page plugin failed, and reports script build errors',async()=>{
+test('Injector re-injects a window whose page plugin failed, and reports script build errors',async t=>{
  const injected=new Map(),logs=[];let state='error',buildFails=false;
  class FakeWS extends EventTarget{constructor(url){super();this.url=url;this.readyState=0;setTimeout(()=>{this.readyState=1;this.dispatchEvent(new Event('open'));},5);}
   close(){this.readyState=3;}
@@ -63,7 +63,7 @@ test('Injector re-injects a window whose page plugin failed, and reports script 
    if(m.method==='Runtime.evaluate'){const e=m.params.expression;if(e.startsWith('window.__TAIGA_INJECTED__==='))return reply({result:{value:injected.has(m.sessionId)&&state!=='error'}});if(e==='document.readyState')return reply({result:{value:'complete'}});if(/;window.__TAIGA_INJECTED__="[a-z:.0-9]+";true$/.test(e)){injected.set(m.sessionId,(injected.get(m.sessionId)||0)+1);state='ready';return reply({result:{value:true}});}}
    reply({});}}
  const inj=new SteamInjector({port:8080,WebSocketImpl:FakeWS,interval:50,verifyEvery:100,log:m=>logs.push(m),health:{shared:"window.__TAIGA_NGL_STATE__!=='error'"},fetchImpl:async()=>({ok:true,json:async()=>({webSocketDebuggerUrl:'ws://127.0.0.1:8080/devtools/browser/abc'})}),scripts:async()=>{if(buildFails)throw Error('catálogo quebrado');return {shared:'2'};}});
- inj.start();await sleep(600);
+ t.after(()=>inj.stop());inj.start();await sleep(600);
  assert.equal(injected.get('s-S'),1);
  state='error';await sleep(600);
  assert.equal(injected.get('s-S'),2,'falhou depois de injetado: injeta de novo sozinho');
@@ -122,4 +122,19 @@ test('More Steam-emulator save formats (SKIDROW, 3DM, RLD!, user_stats, Razor191
  assert.equal(otherFormats('[ACHIEVEMENTS]\n"A" = {unlocked = true, time = 5}').A.earned_time, 5);
  assert.equal(otherFormats('A 1 9\n', 'x/achievement').A.earned, 1);
  assert.equal(otherFormats('[ACH]\nAchieved=1'), null, 'formato comum continua com o leitor padrão');
+});
+
+
+test('Concurrent injector checks share one CDP injection per target',async()=>{
+ let release;const gate=new Promise(resolve=>{release=resolve;});let injections=0,checks=0;
+ const inj=new SteamInjector({scripts:async()=>({shared:'2'})});inj.sessions.set('S','s-S');inj.kinds.set('S','shared');
+ inj.send=async(_method,{expression})=>{
+  if(expression.startsWith('window.__TAIGA_INJECTED__===')){checks++;await gate;return {result:{value:injections>0}};}
+  if(expression==='document.readyState')return {result:{value:'complete'}};
+  if(expression.endsWith(';true')){injections++;return {result:{value:true}};}
+  return {};
+ };
+ const first=inj.ensure('S'),second=inj.ensure('S');assert.equal(checks,1);release();
+ assert.deepEqual(await Promise.all([first,second]),[true,true]);assert.equal(injections,1);assert.equal(inj.ensuring.size,0);
+ await inj.ensure('S');assert.equal(injections,1,'healthy windows are not injected twice');
 });
