@@ -12,7 +12,7 @@ const arch=process.argv[2]||process.arch;
 if(arch!=='x64')throw Error('The first AppImage target is Linux x64.');
 execFileSync(process.execPath,[path.join(root,'tools/build-desktop.mjs'),'linux',arch],{stdio:'inherit'});
 const {build,Platform,Arch}=await import(pathToFileURL(require.resolve('electron-builder')).href);
-const artifacts=await build({projectDir,prepackaged:path.join(root,'dist','Taiga Launcher-linux-x64'),targets:Platform.LINUX.createTarget('AppImage',Arch.x64),config:{
+const artifacts=await build({projectDir,publish:'never',prepackaged:path.join(root,'dist','Taiga Launcher-linux-x64'),targets:Platform.LINUX.createTarget('AppImage',Arch.x64),config:{
  appId:'io.github.rftd.taigalauncher',productName:'Taiga Launcher',executableName:'taiga-launcher',
  artifactName:'Taiga-Launcher-${version}-${arch}.${ext}',
  directories:{output:path.join(root,'dist/appimage')},

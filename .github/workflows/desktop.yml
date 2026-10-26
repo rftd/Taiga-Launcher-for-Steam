@@ -21,17 +21,19 @@ jobs:
           cache: npm
           cache-dependency-path: resources/app/package-lock.json
       - run: npm ci
-      - run: npm test
+      - run: node ../../tools/ci-run.mjs test
         timeout-minutes: 5
-      - run: npm run build:appimage
+      - run: node ../../tools/ci-run.mjs appimage
         if: runner.os == 'Linux'
-      - run: npm run build:desktop -- win32 x64
+      - run: node ../../tools/ci-run.mjs windows
         if: runner.os == 'Windows'
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: Taiga-Launcher-${{ runner.os }}
           path: |
             dist/appimage/*.AppImage
             dist/appimage/*.AppImage.sha256
             dist/Taiga Launcher-win32-x64/
+            dist/ci-logs/
           if-no-files-found: error
