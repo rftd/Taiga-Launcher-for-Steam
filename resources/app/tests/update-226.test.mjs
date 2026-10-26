@@ -1,11 +1,12 @@
 // 2.2.6: Discord mostra o jogo aberto (Rich Presence pelo canal local do Discord).
+import crypto from 'node:crypto';
 import test from 'node:test';import assert from 'node:assert/strict';import net from 'node:net';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';
 import {DiscordPresence,buildActivity,encodeFrame,decodeFrames} from '../lib/discord-rpc.mjs';
 test('Discord presence: handshake, game shown like a Steam game, cleared when the game closes', async t => {
- const dir=fs.mkdtempSync(path.join(os.tmpdir(),'taiga-226-'));const sock=path.join(dir,'discord-ipc-0');const seen=[];
- const server=net.createServer(c=>{let buf=Buffer.alloc(0);c.on('data',d=>{buf=Buffer.concat([buf,d]);const {frames,rest}=decodeFrames(buf);buf=rest;for(const f of frames){seen.push(f);if(f.op===0)c.write(encodeFrame(1,{cmd:'DISPATCH',evt:'READY',data:{v:1}}));}});});
- await new Promise(r=>server.listen(sock,r));t.after(()=>{server.close();fs.rmSync(dir,{recursive:true,force:true});});
- const p=new DiscordPresence({clientId:'123456789012345678',paths:[path.join(dir,'nao-existe'),sock]});
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'taiga-226-'));const sock=process.platform==='win32'?'\\\\?\\pipe\\taiga-test-'+crypto.randomUUID():path.join(dir,'discord-ipc-0');const seen=[],clients=new Set();
+ const server=net.createServer(c=>{clients.add(c);c.once('close',()=>clients.delete(c));let buf=Buffer.alloc(0);c.on('data',d=>{buf=Buffer.concat([buf,d]);const {frames,rest}=decodeFrames(buf);buf=rest;for(const f of frames){seen.push(f);if(f.op===0)c.write(encodeFrame(1,{cmd:'DISPATCH',evt:'READY',data:{v:1}}));}});});
+ await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(sock,resolve);});t.after(async()=>{for(const client of clients)client.destroy();await new Promise(resolve=>server.close(resolve));fs.rmSync(dir,{recursive:true,force:true});});
+ const p=new DiscordPresence({clientId:'123456789012345678',paths:[sock+'-missing',sock]});
  const a=buildActivity({title:'God of War® III Remastered',platform:'PlayStation 4 · shadPS4',cover:'https://cdn.example/cover.jpg',startedAt:'2026-10-20T15:00:00Z'});
  assert.equal(a.details,'God of War® III Remastered');assert.equal(a.status_display_type,2);assert.equal(a.assets.large_image,'https://cdn.example/cover.jpg');assert.equal(a.timestamps.start,Date.parse('2026-10-20T15:00:00Z'));
  assert.equal(await p.set(a),undefined);await new Promise(r=>setTimeout(r,100));

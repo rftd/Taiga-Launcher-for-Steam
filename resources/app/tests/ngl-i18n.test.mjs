@@ -1,6 +1,7 @@
 // Página do jogo dentro da Steam (pacote NativeGameLink adaptado): todo texto visível precisa sair no idioma do
 // TaigaSteam. O teste roda o código compilado de verdade (steam/ngl.bundle.js) num ambiente simulado e confere
 // todas as chaves usadas no código-fonte em português, inglês, espanhol, francês e alemão.
+import {fileURLToPath} from 'node:url';
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';import vm from 'node:vm';
 
 const BUNDLE=new URL('../steam/ngl.bundle.js',import.meta.url);
@@ -21,13 +22,13 @@ function loadBundle(){
 }
 // Todas as chamadas gdlText(chave, padrão) e loc(token, padrão) do código-fonte.
 function sourceCalls(){
- const files=[];const walk=d=>{for(const f of fs.readdirSync(d)){const p=path.join(d,f);if(fs.statSync(p).isDirectory())walk(p);else if(/\.tsx?$/.test(f))files.push(p);}};walk(SOURCE.pathname);
+ const files=[];const walk=d=>{for(const f of fs.readdirSync(d)){const p=path.join(d,f);if(fs.statSync(p).isDirectory())walk(p);else if(/\.tsx?$/.test(f))files.push(p);}};walk(fileURLToPath(SOURCE));
  const lit=String.raw`(?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)"|\x60((?:[^\x60\\]|\\.)*)\x60)`;
  const re=new RegExp(String.raw`\b(gdlText|loc)\(\s*`+lit+String.raw`(?:\s*,\s*`+lit+')?','g');
  const gdl={},loc={};
  // Tokens da Steam passados de forma indireta (listas ['Token', 'Texto'] ou funções auxiliares).
  const pair=/["'\x60]((?:AppDetails|Achievements|AppActivity|AppBox|Played|EventDisplay|GameAction|Button|AppControllerConfiguration|ScreenshotManager)_\w+)["'\x60]\s*,\s*(["'\x60])((?:(?!\2)[^\\]|\\.)+)\2/g;
- for(const f of files){if(/(^|\/)(localization|token-fallbacks|taiga-[\w-]+|token-specs|translations-\w+|custom-translations)\.ts$/.test(f))continue;const s=fs.readFileSync(f,'utf8'),rel=path.relative(SOURCE.pathname,f);for(const m of s.matchAll(re)){const key=m[2]??m[3]??m[4],fallback=m[5]??m[6]??m[7];if(key.includes('${'))continue;((m[1]==='gdlText'?gdl:loc)[key]||=[]).push({fallback,file:rel});}
+ for(const f of files){if(/(^|\/)(localization|token-fallbacks|taiga-[\w-]+|token-specs|translations-\w+|custom-translations)\.ts$/.test(f.split(path.sep).join('/')))continue;const s=fs.readFileSync(f,'utf8'),rel=path.relative(fileURLToPath(SOURCE),f).split(path.sep).join('/');for(const m of s.matchAll(re)){const key=m[2]??m[3]??m[4],fallback=m[5]??m[6]??m[7];if(key.includes('${'))continue;((m[1]==='gdlText'?gdl:loc)[key]||=[]).push({fallback,file:rel});}
   for(const m of s.matchAll(pair))(loc[m[1]]||=[]).push({fallback:m[3],file:rel});}
  return {gdl,loc,files};
 }
