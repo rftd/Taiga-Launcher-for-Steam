@@ -8,7 +8,7 @@ const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const app=path.join(root,'resources/app');
 const task=process.argv[2];
 const commands={
- test:['--env-file=tests/test.env','--test','--test-reporter=spec',...fs.readdirSync(path.join(app,'tests')).filter(file=>file.endsWith('.test.mjs')).sort().map(file=>path.join('tests',file))],
+ test:['--env-file=tests/test.env','--test','--test-reporter=spec','--test-reporter-destination=stdout','--test-reporter='+path.join(root,'tools/ci-test-reporter.mjs'),'--test-reporter-destination=stdout',...fs.readdirSync(path.join(app,'tests')).filter(file=>file.endsWith('.test.mjs')).sort().map(file=>path.join('tests',file))],
  appimage:[path.join(root,'tools/build-appimage.mjs')],
  windows:[path.join(root,'tools/build-desktop.mjs'),'win32','x64'],
 };
@@ -24,7 +24,7 @@ child.on('error',error=>{tail+=error.stack;});
 child.on('close',(code,signal)=>{
  log.end();const status=code??1;
  if(status!==0){
-  const detail=('Task '+task+' failed (exit '+status+(signal?', signal '+signal:'')+').\n'+tail).replaceAll('%','%25').replaceAll('\r','%0D').replaceAll('\n','%0A');
+  const detail=('Task '+task+' failed (exit '+status+(signal?', signal '+signal:'')+').\n'+(task==='test'?'See individual test annotations and dist/ci-logs/test.log.':tail)).replaceAll('%','%25').replaceAll('\r','%0D').replaceAll('\n','%0A');
   console.log('::error title='+task+' failure::'+detail);
  }
  process.exitCode=status;
