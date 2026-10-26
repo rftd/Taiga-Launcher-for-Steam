@@ -1,14 +1,14 @@
 // Preserve command exit codes and expose actionable failures in Actions annotations.
 import fs from 'node:fs';
 import path from 'node:path';
-import {fileURLToPath} from 'node:url';
+import {fileURLToPath,pathToFileURL} from 'node:url';
 import {spawn} from 'node:child_process';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const app=path.join(root,'resources/app');
 const task=process.argv[2];
 const commands={
- test:['--env-file=tests/test.env','--test','--test-reporter=spec','--test-reporter-destination=stdout','--test-reporter='+path.join(root,'tools/ci-test-reporter.mjs'),'--test-reporter-destination=stdout',...fs.readdirSync(path.join(app,'tests')).filter(file=>file.endsWith('.test.mjs')).sort().map(file=>path.join('tests',file))],
+ test:['--env-file=tests/test.env','--test','--test-reporter=spec','--test-reporter-destination=stdout','--test-reporter='+pathToFileURL(path.join(root,'tools/ci-test-reporter.mjs')).href,'--test-reporter-destination=stdout',...fs.readdirSync(path.join(app,'tests')).filter(file=>file.endsWith('.test.mjs')).sort().map(file=>path.join('tests',file))],
  appimage:[path.join(root,'tools/build-appimage.mjs')],
  windows:[path.join(root,'tools/build-desktop.mjs'),'win32','x64'],
 };
