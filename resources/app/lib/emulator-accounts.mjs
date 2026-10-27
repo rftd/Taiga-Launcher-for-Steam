@@ -32,10 +32,12 @@ const exeDir = (config, profile) => { const exe = config.launchers?.[profile]?.e
 export function accountSources(config = {}, env = process.env) {
  const home = env.USERPROFILE || env.HOME || '', appdata = env.APPDATA || (home && path.join(home, 'AppData', 'Roaming')), local = env.LOCALAPPDATA || (home && path.join(home, 'AppData', 'Local')), docs = home && path.join(home, 'Documents');
  const list = [];
+ const xdg=env.XDG_CONFIG_HOME||path.join(home,'.config'),data=env.XDG_DATA_HOME||path.join(home,'.local/share'),flat=path.join(home,'.var/app');
  const add = (emulator, kind, file, extra = {}) => { if (file) list.push({emulator, kind, file, ...extra}); };
  const ra = exeDir(config, 'retroarch');
  add('RetroArch', 'retroarch', ra && path.join(ra, 'retroarch.cfg'));
  add('RetroArch', 'retroarch', appdata && path.join(appdata, 'RetroArch', 'retroarch.cfg'));
+ for(const base of [path.join(xdg,'retroarch'),path.join(flat,'org.libretro.RetroArch/config/retroarch')])add('RetroArch','retroarch',path.join(base,'retroarch.cfg'));
  const ps2 = exeDir(config, 'ps2');
  add('PCSX2', 'pcsx2', ps2 && path.join(ps2, 'inis', 'PCSX2.ini'));
  add('PCSX2', 'pcsx2', docs && path.join(docs, 'PCSX2', 'inis', 'PCSX2.ini'));
@@ -50,6 +52,7 @@ export function accountSources(config = {}, env = process.env) {
  add('Dolphin', 'dolphin', dolphin && path.join(dolphin, 'User', 'Config', 'RetroAchievements.ini'));
  add('Dolphin', 'dolphin', docs && path.join(docs, 'Dolphin Emulator', 'Config', 'RetroAchievements.ini'));
  add('Dolphin', 'dolphin', appdata && path.join(appdata, 'Dolphin Emulator', 'Config', 'RetroAchievements.ini'));
+ for(const base of [path.join(xdg,'dolphin-emu'),path.join(data,'dolphin-emu/Config'),path.join(home,'.dolphin-emu/Config'),path.join(flat,'org.DolphinEmu.dolphin-emu/config/dolphin-emu'),path.join(flat,'org.DolphinEmu.dolphin-emu/data/dolphin-emu/Config')])add('Dolphin','dolphin',path.join(base,'RetroAchievements.ini'));
  const fly = exeDir(config, 'flycast');
  add('Flycast', 'flycast', fly && path.join(fly, 'emu.cfg'));
  add('Flycast', 'flycast', appdata && path.join(appdata, 'flycast', 'emu.cfg'));

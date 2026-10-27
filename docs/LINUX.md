@@ -97,3 +97,19 @@ os arquivos de troféus do emulador.
   atalhos para Steam nativa/Flatpak usando instalações simuladas. Ainda é
   necessário testar jogos, conquistas e injeção CEF em instalações reais de
   Windows e Linux com Steam. O workflow de CI inclui ambos os sistemas.
+
+### Emuladores Flatpak e RetroAchievements
+
+A busca de emuladores consulta os aplicativos Flatpak instalados, incluindo RetroArch,
+RPCS3 e Dolphin. Quando houver mais de uma instalação, escolha a desejada na lista.
+Não é necessário localizar o atalho `.desktop`. O RetroArch Flatpak usa os núcleos
+instalados na configuração do próprio aplicativo. Ao iniciar um jogo, o launcher
+solicita acesso de leitura à pasta desse jogo para aquela execução.
+
+No Linux, a descoberta e a seleção de emuladores excluem executáveis Windows `.exe`.
+Uma configuração antiga desse tipo aparece como não encontrada e pode ser substituída
+por uma instalação nativa ou Flatpak na próxima busca.
+
+As sessões RetroAchievements do RetroArch e do Dolphin são lidas também dos diretórios
+XDG e Flatpak. A conta precisa estar conectada no emulador e o jogo identificado no
+RetroAchievements. O token não aparece na interface.

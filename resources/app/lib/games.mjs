@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {flatpakLaunch} from './flatpak-emulators.mjs';
 import {nativeExecutable} from './linux.mjs';
 import {windowsPath} from './vdf.mjs';
 import {digest} from './files.mjs';
@@ -168,9 +169,10 @@ export function launchFor(g,config,demoExecutable){
   if(/^riotclientservices\.exe$/i.test(path.basename(exe))&&/^--launch-product=[\w-]+ --launch-patchline=[\w-]+$/.test(args))return {exe,args};
   if(!/^(?:com\.epicgames\.launcher|uplay|amazon-games|goggalaxy|steam|heroic|battlenet|link2ea|origin2):\/\//.test(args)&&!/^shell:AppsFolder\\[\w.-]+_[0-9a-z]{13}![\w.-]+$/.test(args))throw Error('Link da loja inválido.');return {exe,args:'"'+args+'"'};}
  const defaults=config.launchers?.[profile]||{},exe=g.launch?.exe||defaults.exe||(profile==='psp'?config.emulator:'');if(!exe||!fs.existsSync(exe)||!fs.statSync(exe).isFile())throw Error('Configure o executável de '+PROFILES[profile].name+' em Como executar: '+g.title);
- let args=g.launch?.args??defaults.args??PROFILES[profile].args,core=g.launch?.core||defaults.core||(profile==='retroarch'?coreFor(g,exe):'');
+ const flatpak=g.launch?.flatpakId?g.launch:(!g.launch?.exe||g.launch.exe===defaults.exe?defaults:{});
+ let args=g.launch?.args??defaults.args??PROFILES[profile].args,core=g.launch?.core||defaults.core||(profile==='retroarch'?coreFor(g,exe,flatpak):'');
  if(!/\{(?:game|titleid|stem)\}/.test(args))throw Error('Os argumentos precisam conter {game}.');if(args.includes('{core}')&&(!core||!fs.existsSync(core)))throw Error('Selecione o núcleo do RetroArch para '+g.title);
  const titleId=String(g.discId||'').toUpperCase().replace(/[^A-Z0-9]/g,''),stem=path.basename(g.path,path.extname(g.path)),dir=path.dirname(g.path);
  if(args.includes('{titleid}')&&!/^[A-Z0-9]{9}$/.test(titleId))throw Error('O código do jogo (Title ID) não foi encontrado para '+g.title);
- for(const v of [g.path,exe,core,dir])if(/["\r\n\0]/.test(v))throw Error('Caminho contém caracteres incompatíveis.');args=args.replaceAll('{game}',g.path).replaceAll('{core}',core).replaceAll('{titleid}',titleId).replaceAll('{stem}',stem).replaceAll('{dir}',dir);if(/[\r\n\0]/.test(args))throw Error('Argumentos inválidos.');return {exe,args};
+ for(const v of [g.path,exe,core,dir])if(/["\r\n\0]/.test(v))throw Error('Caminho contém caracteres incompatíveis.');args=args.replaceAll('{game}',g.path).replaceAll('{core}',core).replaceAll('{titleid}',titleId).replaceAll('{stem}',stem).replaceAll('{dir}',dir);if(/[\r\n\0]/.test(args))throw Error('Argumentos inválidos.');return {exe,args:flatpakLaunch(flatpak,args,g,core)};
 }

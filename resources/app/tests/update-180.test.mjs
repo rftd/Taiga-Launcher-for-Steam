@@ -26,9 +26,9 @@ test('1.8.0: .lnk shortcuts resolve to the emulator program', async () => {
 test('1.8.0: Emulators tab, add by folder or shortcut, list games and folders', async () => {
   const {createApp} = await import('../server.mjs');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'emu-')), data = path.join(dir, 'data'); fs.mkdirSync(data);
-  const pcsx2 = path.join(dir, 'Emus', 'PCSX2'); fs.mkdirSync(path.join(pcsx2, 'bios'), {recursive: true}); fs.writeFileSync(path.join(pcsx2, 'pcsx2-qt.exe'), 'MZ');
-  const ppsspp = path.join(dir, 'Emus', 'PPSSPP'); fs.mkdirSync(ppsspp, {recursive: true}); fs.writeFileSync(path.join(ppsspp, 'PPSSPPWindows64.exe'), 'MZ');
-  fs.writeFileSync(path.join(dir, 'PPSSPP.lnk'), makeLnk(path.join(ppsspp, 'PPSSPPWindows64.exe')));
+  const pcsx2 = path.join(dir, 'Emus', 'PCSX2'); fs.mkdirSync(path.join(pcsx2, 'bios'), {recursive: true}); fs.writeFileSync(path.join(pcsx2, process.platform==='win32'?'pcsx2-qt.exe':'pcsx2-qt'), 'MZ');
+  const ppsspp = path.join(dir, 'Emus', 'PPSSPP'); fs.mkdirSync(ppsspp, {recursive: true}); fs.writeFileSync(path.join(ppsspp, process.platform==='win32'?'PPSSPPWindows64.exe':'PPSSPPSDL'), 'MZ');
+  fs.writeFileSync(path.join(dir, 'PPSSPP.lnk'), makeLnk(path.join(ppsspp, process.platform==='win32'?'PPSSPPWindows64.exe':'PPSSPPSDL')));
   const empty = path.join(dir, 'Nada'); fs.mkdirSync(empty); fs.writeFileSync(path.join(empty, 'notepad.exe'), 'MZ');
   const port = 48000 + Math.floor(Math.random() * 900);
   const a = createApp({dataDir: data, port}); await new Promise(r => a.server.listen(port, '127.0.0.1', r));
