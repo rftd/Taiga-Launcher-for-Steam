@@ -17,11 +17,13 @@ app.setName('Taiga Launcher');
 const launchIndex=process.argv.indexOf('--taiga-launch');
 if(launchIndex>=0){
  app.disableHardwareAcceleration();const temporary=fs.mkdtempSync(path.join(app.getPath('temp'),'taigasteam-launch-'));app.setPath('userData',temporary);
- app.whenReady().then(async()=>{const {standaloneLaunch}=await import('../lib/launch-engine.mjs');await standaloneLaunch(process.argv[launchIndex+1]);}).catch(error=>dialog.showErrorBox('Taiga Launcher',error.message)).finally(()=>app.quit());
+ app.whenReady().then(async()=>{process.chdir(app.getPath('home'));const {standaloneLaunch}=await import('../lib/launch-engine.mjs');await standaloneLaunch(process.argv[launchIndex+1]);}).catch(error=>dialog.showErrorBox('Taiga Launcher',error.message)).finally(()=>app.quit());
  app.on('will-quit',()=>{try{fs.rmSync(temporary,{recursive:true,force:true});}catch{}});
 }else if(!app.requestSingleInstanceLock()){app.quit();}else{
  app.on('second-instance',(_event,args)=>{pendingDemo=demoArg(args)||pendingDemo;if(mainWindow){if(mainWindow.isMinimized())mainWindow.restore();mainWindow.show();mainWindow.focus();showDemo();}});
  app.whenReady().then(async()=>{
+  // Never keep the launcher/AppImage's temporary extraction directory as cwd.
+  fs.mkdirSync(app.getPath('userData'),{recursive:true});process.chdir(app.getPath('userData'));
   // Ícone novo do programa: o Windows guarda o antigo em cache; depois de uma atualização, pede para ele recarregar.
   try{const fsx=require('fs'),px=require('path'),mark=px.join(app.getPath('userData'),'icon-version.txt'),ver=app.getVersion()+':'+fsx.statSync(px.join(__dirname,'icon.ico')).size;if(process.platform==='win32'&&(()=>{try{return fsx.readFileSync(mark,'utf8')!==ver;}catch{return true;}})()){require('child_process').spawn('ie4uinit.exe',['-show'],{detached:true,stdio:'ignore',windowsHide:true}).on('error',()=>{}).unref();fsx.writeFileSync(mark,ver);}}catch{}
   nativeTheme.themeSource='system';

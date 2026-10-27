@@ -5,6 +5,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {ensureWorkingDirectory} from './lib/working-directory.mjs';
 import {atomic,json,save,normalize,digest} from './lib/files.mjs';
 import {inspectGame,scanGames as scan,launchFor,PROFILES,auxiliaryExecutable} from './lib/games.mjs';
 import {parseVDF,encodeVDF,shortcuts,upsert,value,shortcutInfo,windowsPath} from './lib/vdf.mjs';
@@ -73,6 +74,7 @@ const ROOT=path.dirname(fileURLToPath(import.meta.url));
 export function pickSystemLanguage(list){const first=(Array.isArray(list)?list:[list]).map(x=>String(x||'').trim().toLowerCase()).find(Boolean);if(!first)return 'pt-BR';const base=first.split(/[-_]/)[0];return base==='pt'?'pt-BR':['es','fr','de','en'].includes(base)?base:'en';}
 export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,launcherExecutable=null,onLanguageChange=null,onStartupChange=null,systemLanguages=null,brandFetch=null,xboxLogin=null,readShortcut=null,fileIcon=null,installedRegQuery=null,onAchievementUnlocked=null,onOpenManager=null,startInjector=false,injectorOptions={},onSteamNeedsIntegration=null,epicLogin=null,pageFetch=null,secretBox=null,psnLogin=null,onApplyUpdate=null,imageThumb=null,heroFromCover=null,iconResize=null,imageValidate=null,imageConvert=null,demoExecutable=process.execPath,providersFactory=(cfg,dir)=>new Providers(cfg,dir,{convertImage:imageConvert,heroFromCover,defaultServer:(()=>{try{return String(JSON.parse(fs.readFileSync(path.join(ROOT,'package.json'),'utf8')).taigaServer||'');}catch{return '';}})()})}={}){
  fs.mkdirSync(dataDir,{recursive:true});
+ ensureWorkingDirectory(dataDir);
  const configFile=path.join(dataDir,'config.json'),dbFile=path.join(dataDir,'games.json');
  let config=json(configFile,{emulator:'',steamDir:'',account:'',roots:[],sgdbKey:'',igdbId:'',igdbSecret:'',raUser:'',raKey:'',adminToken:crypto.randomBytes(32).toString('hex'),readToken:crypto.randomBytes(32).toString('hex')});
  openSecrets(config,secretBox);const saveConfig=()=>save(configFile,sealSecrets(config,secretBox));

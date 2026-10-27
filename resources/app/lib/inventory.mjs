@@ -3,6 +3,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {digest} from './files.mjs';
 import {Worker,isMainThread,parentPort,workerData} from 'node:worker_threads';
+import {ensureWorkingDirectory} from './working-directory.mjs';
 import {discoverEmulators} from './emulator-registry.mjs';
 import zlib from 'node:zlib';
 import {platformByKey} from './platforms.mjs';
@@ -20,6 +21,7 @@ function headerSkip(key,head,size){if(key==='nes'||key==='fds')return /^(?:NES|F
 import {scanGames,sweepGames,inspectGame,suggestedGameRoot,auxiliaryExecutable,measureGameFolder} from './games.mjs';
 export function inventory(mode,paths){
  if(!Array.isArray(paths)||paths.some(p=>typeof p!=='string')||paths.length>1000)return Promise.reject(Error('Selecione até 1.000 arquivos ou pastas por vez.'));
+ ensureWorkingDirectory();
  return new Promise((resolve,reject)=>{const worker=new Worker(new URL(import.meta.url),{workerData:{mode,paths},execArgv:[]});const timeout=setTimeout(()=>{worker.terminate();reject(Error('Busca demorou demais. Selecione uma pasta menor.'));},mode==='sweep'?120000:Math.min(900000,60000+paths.length*(mode==='inspect'?400:0)));worker.once('message',result=>{clearTimeout(timeout);resolve(result);});worker.once('error',error=>{clearTimeout(timeout);reject(error);});worker.once('exit',code=>{clearTimeout(timeout);if(code)reject(Error('Não foi possível concluir a leitura dos jogos.'));});});
 }
 if(!isMainThread&&workerData.mode==='emulators'){parentPort.postMessage(discoverEmulators(workerData.paths));}

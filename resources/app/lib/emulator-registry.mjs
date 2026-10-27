@@ -1,6 +1,7 @@
 import fs from 'node:fs';import path from 'node:path';
 import os from 'node:os';
 import {windowsPath} from './vdf.mjs';
+import {ensureWorkingDirectory} from './working-directory.mjs';
 // Profiles retain the identifiers used by existing Taiga Launcher installations.
 export const EMULATORS={
  psp:{name:'PPSSPP',platform:'PlayStation Portable',platforms:['PlayStation Portable'],files:['PPSSPPWindows64.exe','PPSSPPWindows.exe','PPSSPPWindowsARM64.exe'],extensions:['iso','cso','pbp','chd'],args:'"{game}"',fullscreenArgs:'"{game}" --pause-menu-exit --fullscreen',achievements:'retroachievements'},
@@ -52,7 +53,7 @@ const HINTS=[['psp',/ppsspp/],['ps2',/pcsx2/],['ps1',/duckstation|epsxe|swanstat
 export function guessProfile(exe){const list=parts(exe),base=(list.at(-1)||'').toLowerCase();for(const [key,e]of Object.entries(EMULATORS))if(e.files.some(n=>n.toLowerCase()===base))return key;const words=[base,(list.at(-2)||'').toLowerCase()];for(const w of words)for(const [key,re]of HINTS)if(re.test(w))return key;return null;}
 export function detectedArguments(profile,file){const name=path.basename(file).toLowerCase();if(profile==='ps1'&&name==='epsxe.exe')return '-nogui -loadbin "{game}"';if(profile==='project64'&&name==='rmg.exe')return '--fullscreen "{game}"';if(profile==='ps2'&&!/qt/i.test(name))return '"{game}" --nogui --fullscreen';if(profile==='switch'&&/^(?:yuzu|suyu|citron|eden|sudachi)/.test(name))return '-f -g "{game}"';if(profile==='mgba'&&/visualboyadvance/i.test(name))return '"{game}"';if(profile==='melonds'&&/desmume/i.test(name))return '"{game}"';return EMULATORS[profile].fullscreenArgs||EMULATORS[profile].args;}
 export function launcherSettings(old={},profile,exe,source='manual'){const custom=old.args!==undefined&&old.source!=='detected'&&old.argsSource!=='detected';return {...old,exe,args:custom?old.args:detectedArguments(profile,exe),argsSource:custom?'manual':'detected',source};}
-export function defaultDiscoveryRoots(config,{env=process.env,home=env.USERPROFILE||env.HOME||'',appRoot=process.cwd()}={}){
+export function defaultDiscoveryRoots(config,{env=process.env,home=env.USERPROFILE||env.HOME||'',appRoot=ensureWorkingDirectory()}={}){
  const roots=[...(process.platform==='linux'?['/usr/bin','/usr/local/bin',home&&path.join(home,'.local/bin')]:[]),path.join(appRoot,'Emuladores'),path.join(appRoot,'Emulators'),path.join(appRoot,'emulators'),home&&path.join(home,'Emulators'),home&&path.join(home,'Emuladores'),home&&path.join(home,'Applications'),env.LOCALAPPDATA&&path.join(env.LOCALAPPDATA,'Programs'),env.ProgramFiles&&path.join(env.ProgramFiles),env['ProgramFiles(x86)']&&path.join(env['ProgramFiles(x86)'])];
  for(const root of config.roots||[]){const drive=path.parse(root).root;roots.push(path.join(root,'Emuladores'),path.join(root,'Emulators'),path.join(path.dirname(root),'Emuladores'),path.join(path.dirname(root),'Emulators'),drive&&path.join(drive,'Emuladores'),drive&&path.join(drive,'Emulators'));}
  for(const launcher of Object.values(config.launchers||{}))if(launcher.exe)roots.push(path.dirname(launcher.exe),path.dirname(path.dirname(launcher.exe)));if(config.emulator)roots.push(path.dirname(config.emulator));if(process.platform==='win32')roots.push('C:\\Emulators','C:\\Emuladores','C:\\SFP\\Emuladores');return [...new Set(roots.filter(Boolean).map(r=>path.resolve(r)))];
