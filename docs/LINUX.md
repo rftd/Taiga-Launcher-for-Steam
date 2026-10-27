@@ -63,6 +63,23 @@ CEF usa a porta de depuração da Steam, como no Windows.
 
 ## Dados, emuladores e limitações
 
+### Troféus do RPCS3 Flatpak
+
+O Taiga procura automaticamente os troféus em
+`~/.var/app/net.rpcs3.RPCS3/config/rpcs3/dev_hdd0/home/00000001/trophy`.
+A instalação nativa em `$XDG_CONFIG_HOME/rpcs3` também é reconhecida.
+O jogo precisa ter sido aberto no RPCS3 para que ele registre os arquivos de
+troféus. Na fonte de conquistas do jogo, use **Automático** ou **RPCS3**.
+
+Se você mudou o disco virtual do RPCS3, o Taiga lê o caminho em `vfs.yml`.
+Também é possível informar a pasta do RPCS3, `dev_hdd0` ou a pasta de troféus
+nas configurações. Para outro usuário do emulador, ajuste o usuário RPCS3
+(o padrão é `00000001`). Se houver duas instalações com progresso do mesmo
+jogo, selecione uma pasta para evitar misturar os dados. O leitor não altera
+os arquivos de troféus do emulador.
+
+### Pastas e recursos
+
 - Dados: `$XDG_DATA_HOME/taiga-launcher`, padrão `~/.local/share/taiga-launcher`.
   `TAIGA_DATA` continua disponível para desenvolvimento. Uma pasta antiga
   `~/Taiga Launcher` é reaproveitada quando existe.
