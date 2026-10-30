@@ -38,4 +38,4 @@ export async function validXbox(auth, {fetchImpl = (...a) => fetch(...a), save =
 }
 export const xboxHeader = s => 'XBL3.0 x=' + s.xsts.uhs + ';' + s.xsts.token;
 // Nome da família do pacote a partir do endereço de abertura "shell:AppsFolder\PFN!App".
-export const pfnOf = game => String(game?.store?.url || game?.launch?.args || '').match(/AppsFolder\\([^!\\]+)!/i)?.[1] || '';
+export const pfnOf = game => String(game?.store?.url || game?.launch?.args || '').match(/AppsFolder\\([^!\\]+)!/i)?.[1] || String(game?.store?.pfn || '');

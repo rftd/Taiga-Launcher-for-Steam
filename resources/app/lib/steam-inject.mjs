@@ -11,6 +11,12 @@ export const DEFAULT_DEBUG_PORT = 8080;
 export const steamLaunchArgs = (port = DEFAULT_DEBUG_PORT) => ['-cef-enable-debugging', '-devtools-port', String(port)];
 const MARKER = '__TAIGA_INJECTED__';
 
+// Páginas da Loja e da Comunidade abertas no cliente (fora do perfil): o Taiga Launcher se anexa antes, para o script do
+// perfil já estar registrado quando a mesma janela navegar até ele (os números aparecem junto com a página).
+export function isSteamWebTarget(info) {
+ return !!info && ['page', 'webview', 'iframe'].includes(info.type) && /^https:\/\/(steamcommunity\.com|store\.steampowered\.com)\//i.test(String(info.url || ''));
+}
+const COMMUNITY_GUARD = 'if(/^https:\\/\\/steamcommunity\\.com\\/(id|profiles)\\//i.test(location.href)){';
 export function targetKind(info) {
  if (!info) return null;
  const title = String(info.title || ''), url = String(info.url || '');
@@ -34,7 +40,7 @@ export class SteamInjector {
  }
  start() { if (this.timer) return; this.tick(); this.timer = setInterval(() => this.tick(), this.interval); this.timer.unref?.(); }
  stop() { clearInterval(this.timer); this.timer = null; this.disconnect(); }
- status() { return {enabled: !!this.enabled(), connected: !!this.ws && this.ws.readyState === 1, port: this.activePort || this.port, windows: [...this.injected.entries()].map(([id, kind]) => kind), lastError: this.lastError, calls: this.calls, lastCallError: this.lastCallError}; }
+ status() { return {enabled: !!this.enabled(), connected: !!this.ws && this.ws.readyState === 1, port: this.activePort || this.port, windows: [...this.injected.entries()].map(([id, kind]) => kind).filter(kind => kind !== 'web'), lastError: this.lastError, calls: this.calls, lastCallError: this.lastCallError, callStats: [...(this.callStats || new Map())].sort((a, b) => b[1].ms - a[1].ms).slice(0, 15).map(([method, r]) => ({method, n: r.n, ms: r.ms, maxMs: r.max, kb: Math.round(r.kb)}))}; }
  async tick() {
   if (!this.enabled()) { if (this.ws) this.disconnect(); return; }
   // Conectado: confere de novo as janelas que ainda não receberam o script (ex.: a Steam ainda estava carregando).
@@ -101,7 +107,7 @@ export class SteamInjector {
   this.checks.set(targetId, timer);
  }
  async handleTarget(info) {
-  const kind = this.kindOf(info);
+  const kind = this.kindOf(info) || (this.prewarmWeb !== false && isSteamWebTarget(info) ? 'web' : null);
   // A janela saiu de uma página atendida (ex.: da Comunidade para a Loja): para de injetar e de aceitar pedidos dela.
   if (!kind) { if (info?.targetId && this.kinds.has(info.targetId)) { this.kinds.delete(info.targetId); this.injected.delete(info.targetId); } return; }
   this.kinds.set(info.targetId, kind);
@@ -115,13 +121,13 @@ export class SteamInjector {
    this.sessions.set(info.targetId, sessionId);
    await this.send('Runtime.enable', {}, sessionId).catch(() => {});
    // Ponte do frontend para o backend (como o FFI do Millennium): window.__taiga_ffi__(json).
-   if ((kind === 'shared' || kind === 'community') && this.onCall) await this.send('Runtime.addBinding', {name: '__taiga_ffi__'}, sessionId).catch(() => {});
+   if ((kind === 'shared' || kind === 'community' || kind === 'web') && this.onCall) await this.send('Runtime.addBinding', {name: '__taiga_ffi__'}, sessionId).catch(() => {});
    // Comunidade: imagens dos jogos do Taiga Launcher chegam como data: (sem depender da política de conteúdo do site).
-   if (kind === 'community') {
+   if (kind === 'community' || kind === 'web') {
     await this.send('Page.setBypassCSP', {enabled: true}, sessionId).catch(() => {});
     // Também no começo de cada página nova da Comunidade (antes de a Steam desenhar), para os números e cartões
     // aparecerem sem atraso; o script espera a página ficar pronta sozinho.
-    try { const src = (await this.scripts())?.community; if (src) await this.send('Page.addScriptToEvaluateOnNewDocument', {source: `${src}\n;window.${MARKER}=${JSON.stringify('community' + (this.version ? ':' + (typeof this.version === 'function' ? this.version() : this.version) : ''))};`}, sessionId); } catch {}
+    try { const src = (await this.scripts())?.community; if (src) await this.send('Page.addScriptToEvaluateOnNewDocument', {source: `${COMMUNITY_GUARD}${src}\n;window.${MARKER}=${JSON.stringify('community' + (this.version ? ':' + (typeof this.version === 'function' ? this.version() : this.version) : ''))};}`}, sessionId); } catch {}
    }
    } finally { this.attaching.delete(info.targetId); release(); }
   }
@@ -136,6 +142,7 @@ export class SteamInjector {
  async ensureTarget(targetId) {
   const sessionId = this.sessions.get(targetId), kind = this.kinds.get(targetId);
   if (!sessionId || !kind) return false;
+  if (kind === 'web') { this.injected.set(targetId, 'web'); return true; }
   // A marca leva a versão: depois de atualizar o Taiga Launcher, a Steam já aberta recebe o script novo.
   const ver = typeof this.version === 'function' ? this.version() : this.version;
   const mark = JSON.stringify(kind + (ver ? ':' + ver : ''));
@@ -151,7 +158,8 @@ export class SteamInjector {
   // travava o steamwebhelper ("não está respondendo") quando o Taiga Launcher já estava aberto antes da Steam.
   // Espera a janela ter alguns segundos de vida (no contexto principal, também o SteamClient pronto).
   try {
-   const minAge = kind === 'shared' ? 15000 : 4000;
+   // Comunidade: página da web comum (o script é pequeno e espera a página sozinho), sem espera mínima.
+   const minAge = kind === 'shared' ? 15000 : kind === 'community' ? 0 : 4000;
    const st = await this.send('Runtime.evaluate', {expression: `({age: performance.now(), client: !!(window.SteamClient && window.SteamClient.Apps)})`, returnByValue: true}, sessionId);
    const v = st?.result?.value;
    const age = Number(v?.age) || 0, client = !!v?.client;
@@ -170,8 +178,15 @@ export class SteamInjector {
  }
  fail(targetId) { this.failures.set(targetId, (this.failures.get(targetId) || 0) + 1); (this.failedAt ||= new Map()).set(targetId, Date.now()); }
  // Reinjeta tudo (ex.: catálogo ou idioma mudou).
- async reload() {
+ // Vários pedidos seguidos (muitos jogos adicionados de uma vez) viram uma recarga só.
+ reload() {
+  if (this.reloading) { this.reloadAgain = true; return this.reloading; }
+  this.reloading = (async () => { do { this.reloadAgain = false; await this.reloadNow(); if (this.reloadAgain) await new Promise(r => setTimeout(r, 250)); } while (this.reloadAgain); })().finally(() => { this.reloading = null; });
+  return this.reloading;
+ }
+ async reloadNow() {
   for (const id of this.sessions.keys()) {
+   if (this.kinds.get(id) === 'web') continue;
    if (this.kinds.get(id) === 'shared' && this.refreshExpression && this.injected.has(id)) { const expr = await this.refreshExpression(); await this.send('Runtime.evaluate', {expression: expr, returnByValue: true}, this.sessions.get(id)).catch(() => {}); continue; }
    await this.send('Runtime.evaluate', {expression: `delete window.${MARKER};true`}, this.sessions.get(id)).catch(() => {}); this.injected.delete(id); this.schedule(id, 100);
   }
@@ -187,15 +202,18 @@ export class SteamInjector {
   const id = Number(req?.id); if (!Number.isInteger(id)) return;
   let ok = true, payload;
   const targetId = [...this.sessions].find(([, s]) => s === sessionId)?.[0], kind = targetId ? this.kinds.get(targetId) : null;
+  const t0 = Date.now();
   try { payload = await this.onCall(String(req.method || ''), req.args && typeof req.args === 'object' ? req.args : {}, kind); this.calls++; }
   catch (e) { ok = false; payload = String(e?.message || e).slice(0, 500); this.lastCallError = String(req.method) + ': ' + payload; }
   const expression = `window.__taiga_ffi_resolve__&&window.__taiga_ffi_resolve__(${id},${ok},${JSON.stringify(typeof payload === 'string' ? payload : JSON.stringify(payload ?? null))})`;
+  // Estatística por pedido (vai no relatório): quantas vezes, tempo e tamanho, para achar o que pesa na Steam.
+  try { const m = String(req.method || '').slice(0, 60), row = (this.callStats ||= new Map()).get(m) || {n: 0, ms: 0, kb: 0, max: 0}; const ms = Date.now() - t0; row.n++; row.ms += ms; row.kb += expression.length / 1024; row.max = Math.max(row.max, ms); this.callStats.set(m, row); if (this.callStats.size > 200) this.callStats.clear(); } catch {}
   await this.send('Runtime.evaluate', {expression, ...(params.executionContextId ? {contextId: params.executionContextId} : {})}, sessionId).catch(() => {});
  }
  // Notificação nativa da Steam (toast de conquista) pelo contexto compartilhado; desktop/Big Picture como reserva.
  async notify(payload) {
   const order = ['shared', 'bigpicture', 'library'];
-  const targets = [...this.sessions.keys()].filter(id => this.injected.has(id)).sort((a, b) => order.indexOf(this.kinds.get(a)) - order.indexOf(this.kinds.get(b)));
+  const targets = [...this.sessions.keys()].filter(id => this.injected.has(id) && order.includes(this.kinds.get(id))).sort((a, b) => order.indexOf(this.kinds.get(a)) - order.indexOf(this.kinds.get(b)));
   for (const id of targets) {
    try {
     const r = await this.send('Runtime.evaluate', {expression: `(async()=>{const f=window.__TAIGA_NOTIFY__;return f?await f(${JSON.stringify(payload)}):false})()`, awaitPromise: true, returnByValue: true}, this.sessions.get(id));

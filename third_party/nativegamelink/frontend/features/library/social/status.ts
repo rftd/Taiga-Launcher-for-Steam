@@ -17,6 +17,7 @@ import {
 	setupPostDeleteHandlers,
 	STEAM_EMOTICONS,
 } from './feed';
+import { submitOnlineComment } from './online-comments';
 
 const statusComposerLifecycles = new WeakMap<Document, DisposableRegistry>();
 
@@ -96,6 +97,17 @@ export function setupStatusPostBox(
 		if (!ownsTarget()) return;
 		const text = statusArea.value.trim();
 		if (!text) return;
+		// Jogo com comentários online (Taiga Launcher): publica para todos que têm o jogo, e só limpa a caixa se deu certo.
+		if (submitOnlineComment(doc, shortcutAppId, text, ok => {
+			if (!ok) return;
+			if (statusArea.value.trim() === text) statusArea.value = '';
+			syncPostButtonState();
+			setActive(false);
+			autoResizeTextarea();
+		})) {
+			doc.getElementById('gdl-emoticon-picker')?.remove();
+			return;
+		}
 		const user = getCurrentSteamUser(doc);
 		saveLocalActivityPost(steamAppId, {
 			id: 'post_' + Date.now(),

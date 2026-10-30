@@ -16,6 +16,8 @@ export const fetchCommunityActivityBackend = callable<[{ steam_app_id: string; s
 
 export const fetchCommunityContentBackend = callable<[{ steam_app_id: string; language: string }], string>('fetch_community_content');
 
+export const taigaVirtualCardsBackend = callable<[{ steam_app_id: string }], string>('taiga_virtual_cards');
+
 export const fetchCommunityItemsCatalogBackend = callable<[{ steam_app_id: string; language: string }], string>('fetch_community_items_catalog');
 
 export const feLogBackend         = callable<[{ msg: string }], string>('fe_log');

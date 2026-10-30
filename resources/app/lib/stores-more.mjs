@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 
-const isFile = f => { try { return fs.statSync(f).isFile(); } catch { return false; } };
+const isFile = f => { try { return fs.statSync(f).isFile(); } catch (e) { return /\.exe$/i.test(String(f)) && (e?.code === 'EPERM' || e?.code === 'EACCES'); } };
 const isDir = f => { try { return fs.statSync(f).isDirectory(); } catch { return false; } };
 const readJSON = f => { try { if (fs.statSync(f).size > 16 * 1024 * 1024) return null; return JSON.parse(fs.readFileSync(f, 'utf8').replace(/^\uFEFF/, '')); } catch { return null; } };
 const readText = (f, max = 2 * 1024 * 1024) => { try { if (fs.statSync(f).size > max) return ''; return fs.readFileSync(f, 'utf8').replace(/^\uFEFF/, ''); } catch { return ''; } };
@@ -24,6 +24,26 @@ export function packageFamilyName(name, publisher) {
  const abc = '0123456789abcdefghjkmnpqrstvwxyz'; let out = '';
  for (let i = 0; i < 65; i += 5) out += abc[parseInt(bits.slice(i, i + 5), 2)];
  return name + '_' + out;
+}
+// Identidade Xbox de um jogo: PFN e Title ID (decimal, como o Xbox Live usa). Vem dos dados da loja, do endereço
+// "shell:AppsFolder\PFN!App" ou do MicrosoftGame.config ao lado do executável (jogos achados como PC comum também).
+const identityCache = new Map();
+export function xboxIdentity(game) {
+ const out = {pfn: String(game?.store?.url || game?.launch?.args || '').match(/AppsFolder\\([^!\\]+)!/i)?.[1] || String(game?.store?.pfn || ''), titleId: /^\d+$/.test(String(game?.store?.titleId || '')) ? String(game.store.titleId) : ''};
+ if (out.pfn && out.titleId) return out;
+ const exe = String(game?.launch?.exe || game?.path || ''); if (!exe || game?.notInstalled) return out;
+ let hit = identityCache.get(exe.toLowerCase());
+ if (!hit) {
+  hit = {pfn: '', titleId: ''};
+  let dir = path.dirname(exe);
+  for (let i = 0; i < 5 && dir; i++) {
+   const cfg = readText(path.join(dir, 'MicrosoftGame.config'), 512 * 1024);
+   if (cfg) { const name = xmlAttr(cfg, 'Identity', 'Name'), pub = xmlAttr(cfg, 'Identity', 'Publisher'); if (name && pub) hit.pfn = packageFamilyName(name, pub); const tid = cfg.match(/<TitleId>\s*(?:0x)?([0-9A-Fa-f]{1,8})\s*<\/TitleId>/i)?.[1]; if (tid) hit.titleId = String(parseInt(tid, 16)); break; }
+   const up = path.dirname(dir); if (up === dir) break; dir = up;
+  }
+  identityCache.set(exe.toLowerCase(), hit); if (identityCache.size > 500) identityCache.delete(identityCache.keys().next().value);
+ }
+ return {pfn: out.pfn || hit.pfn, titleId: out.titleId || hit.titleId};
 }
 export function gamingRoots(drives) {
  const out = [];
@@ -45,7 +65,8 @@ export function scanXbox({drives = []} = {}) {
   let title = xmlAttr(cfg, 'ShellVisuals', 'DefaultDisplayName'); if (!title || /^ms-resource:/i.test(title)) title = e.name;
   const exe = exeName ? path.join(content, ...exeName.split(/[\\/]/)) : '';
   if (!name || !publisher || !isFile(exe)) continue;
-  out.push({store: 'xbox', storeName: 'Xbox', id: name, title, path: exe, root: content, url: 'shell:AppsFolder\\' + packageFamilyName(name, publisher) + '!' + appId, needsLauncher: true});
+  const tid = cfg.match(/<TitleId>\s*(?:0x)?([0-9A-Fa-f]{1,8})\s*<\/TitleId>/i)?.[1];
+  out.push({store: 'xbox', storeName: 'Xbox', id: name, title, path: exe, root: content, url: 'shell:AppsFolder\\' + packageFamilyName(name, publisher) + '!' + appId, needsLauncher: true, ...(tid ? {titleId: String(parseInt(tid, 16))} : {}), pfn: packageFamilyName(name, publisher)});
  }
  return out;
 }

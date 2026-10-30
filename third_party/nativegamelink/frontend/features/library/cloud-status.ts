@@ -1,6 +1,6 @@
 import { escapeHtml } from '../../core/text';
 import { PLAYBAR_CLASSES } from '../../steam/css';
-import { loc, steamLanguageSync } from '../../steam/localization';
+import { displayLanguage, loc, steamLanguageSync } from '../../steam/localization';
 import {
 	applyNativePlaybarTypography,
 	buildNativeCloudBlueprint,
@@ -17,6 +17,7 @@ import { isShortcutDismissed } from '../shortcuts/dismissed';
 import { paintedNativePlaybar, paintedNativeStats } from '../../steam/library-details';
 import { ensureNativeGameInfoStyles } from './styles';
 import { backendLog } from '../../api/backend';
+import { isStoreInstallPending } from './store-install';
 
 let lastBarReport = '';
 
@@ -34,6 +35,15 @@ function isPaintedCloudElement(doc: Document, element: HTMLElement): boolean {
 		if (style.opacity === '0' || style.visibility === 'hidden' || style.display === 'none') return false;
 	}
 	return true;
+}
+
+// Taiga Launcher: em português o rótulo fica "Nuvem" (a Steam usa "Status do Steam Cloud").
+function taigaCloudLabel(wrapper: HTMLElement): void {
+	try {
+		if (displayLanguage() !== 'brazilian') return;
+		const label = wrapper.querySelector<HTMLElement>(`.${(PLAYBAR_CLASSES().PlayBarLabel || 'x').split(' ')[0]}`);
+		if (label && label.textContent !== 'Nuvem') label.textContent = 'Nuvem';
+	} catch {}
 }
 
 function cloudSynchronizedSvg(extraClass = ''): string {
@@ -178,6 +188,8 @@ export function ensureCloudStatus(doc: Document): void {
 	const shortcutId = routedSteamAppId(doc);
 	if (!shortcutId || shortcutId < 2147483648 || isShortcutDismissed(shortcutId)
 		|| !getCommittedShortcutSteamAppId(shortcutId)) return;
+	// Jogo de loja ainda não instalado: sem "Nuvem" (o lugar é do "Espaço necessário").
+	if (isStoreInstallPending(shortcutId)) { removeCloudStatus(doc); return; }
 	const playbar = paintedNativePlaybar(doc, shortcutId);
 	let statsSections = paintedNativeStats(doc, shortcutId);
 	if (!playbar && !statsSections.length) return;
@@ -230,6 +242,7 @@ export function ensureCloudStatus(doc: Document): void {
 			// Repair only a hidden or invalid widget left by an earlier mount.
 			for (const duplicate of ownedClouds.slice(1)) duplicate.remove();
 			restoreOwnedCloudStatus(ownedClouds[0]);
+			taigaCloudLabel(ownedClouds[0]);
 			cachedCloudStatus.set(doc, { wrapper: ownedClouds[0], language });
 			continue;
 		}
@@ -252,6 +265,7 @@ export function ensureCloudStatus(doc: Document): void {
 		if (wrapper.parentElement !== stats || (wrapper.nextSibling !== targetReference && wrapper !== targetReference)) {
 			stats.insertBefore(wrapper, targetReference);
 		}
+		taigaCloudLabel(wrapper);
 		cachedCloudStatus.set(doc, { wrapper, language });
 	}
 	// Retire only unused temporary rows. Hidden native rows elsewhere in the

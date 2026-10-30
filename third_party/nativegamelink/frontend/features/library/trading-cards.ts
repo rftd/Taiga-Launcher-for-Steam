@@ -2,7 +2,7 @@ import { backendLog } from '../../api/backend';
 import { escapeHtml } from '../../core/text';
 import { DisposableRegistry } from '../../core/disposables';
 import { ACH_CLASSES } from '../../steam/css';
-import { gdlText, loc } from '../../steam/localization';
+import { gdlText, loc, displayLanguage } from '../../steam/localization';
 import { getOfficialCommunityItems, normalizeCommunityAssetUrl } from './community-items';
 import { GDL_INJECTED } from './constants';
 import type { NativeLibraryLayout } from './layout';
@@ -544,6 +544,20 @@ export function setupTradingCardTilt(root: HTMLElement): void {
 	}
 }
 
+// Taiga Launcher: textos das cartas geradas para jogos sem página na Steam (só visuais, não são cartas da Steam).
+const GEN_TEXT: Record<string, Record<string, string>> = {
+	pt: { count: '{n} cartas para colecionar', igdb: 'Personagens do jogo', achievements: 'Conquistas do jogo', help: 'Cartas criadas pelo Taiga Launcher para este jogo, com os personagens dele (IGDB) ou com as imagens das conquistas. São só visuais: não são cartas da Steam e não vão para o inventário.' },
+	en: { count: '{n} cards to collect', igdb: 'Game characters', achievements: 'Game achievements', help: 'Cards made by Taiga Launcher for this game, with its characters (IGDB) or achievement images. They are only visual: they are not Steam cards and do not go to your inventory.' },
+	es: { count: '{n} cartas para coleccionar', igdb: 'Personajes del juego', achievements: 'Logros del juego', help: 'Cartas creadas por Taiga Launcher para este juego, con sus personajes (IGDB) o las imágenes de los logros. Son solo visuales: no son cartas de Steam y no van al inventario.' },
+	fr: { count: '{n} cartes à collectionner', igdb: 'Personnages du jeu', achievements: 'Succès du jeu', help: "Cartes créées par Taiga Launcher pour ce jeu, avec ses personnages (IGDB) ou les images des succès. Elles sont seulement visuelles : ce ne sont pas des cartes Steam et elles ne vont pas dans l'inventaire." },
+	de: { count: '{n} Sammelkarten', igdb: 'Spielfiguren', achievements: 'Erfolge des Spiels', help: 'Von Taiga Launcher für dieses Spiel erstellte Karten, mit seinen Figuren (IGDB) oder den Bildern der Erfolge. Sie sind nur optisch: keine Steam-Karten und nicht im Inventar.' },
+};
+function genText(key: string, n = 0): string {
+	const l = displayLanguage();
+	const t = /^(brazilian|portuguese)/.test(l) ? GEN_TEXT.pt : /^(spanish|latam)/.test(l) ? GEN_TEXT.es : /^french/.test(l) ? GEN_TEXT.fr : /^german/.test(l) ? GEN_TEXT.de : GEN_TEXT.en;
+	return (t[key] || GEN_TEXT.en[key] || '').replace('{n}', String(n));
+}
+
 export interface TradingCardRenderOptions {
 	steamAppId: string;
 	shortcutAppId: string | null;
@@ -551,14 +565,14 @@ export interface TradingCardRenderOptions {
 	isCurrent: () => boolean;
 }
 
-function setupTradingCardsHelpTooltip(doc: Document, button: HTMLElement): void {
+function setupTradingCardsHelpTooltip(doc: Document, button: HTMLElement, generated = false): void {
 	let popup: HTMLElement | null = null;
 
 	const show = (): void => {
 		if (popup || !button.isConnected) return;
 		popup = doc.createElement('div');
 		popup.className = 'gdl-trading-cards-help-popup';
-		popup.innerHTML = `
+		popup.innerHTML = generated ? `<div>${escapeHtml(genText('help'))}</div>` : `
 			<div style="margin-bottom:10px;">${escapeHtml(gdlText('trading_cards_help_p1', "Find cards while playing. You can trade them with friends (or on the Steam Community Market) for cards you haven't been able to find."))}</div>
 			<div>${escapeHtml(gdlText('trading_cards_help_p2', 'Complete the full set and turn it into a badge. Badges increase your Steam level and unlock benefits for your account and profile.'))}</div>
 		`;
@@ -668,7 +682,7 @@ export async function renderOfficialTradingCards(
 		sectionId: 'gdl-trading-cards-section',
 		headerText: loc('AppDetails_SectionTitle_TradingCards', gdlText('trading_cards', 'Trading Cards')),
 		innerId: 'gdl-trading-cards-content',
-		innerHtml: `<div class="${ACH_CLASSES().HighlightDiv} gdl-native-sidebar-panel" style="padding:0 !important;box-sizing:border-box;overflow:visible;"><div class="gdl-trading-cards-badge-header"><div class="gdl-trading-badge" title="${escapeHtml(badgeTitle)}"><img class="gdl-trading-badge-image" src="${escapeHtml(badgeSource)}" alt="${escapeHtml(badgeTitle)}" /></div><div style="min-width:0;"><div class="gdl-trading-badge-title" style="font-size:16px;line-height:1.25;color:#fff;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(badgeTitle)}</div><div class="gdl-trading-badge-xp" style="font-size:13px;color:#8f98a0;margin-top:2px;">${escapeHtml(gdlText('experience_points', '100 XP'))}</div></div></div><div class="gdl-trading-cards-body" style="padding:12px 10px 14px;"><div class="gdl-trading-card-remaining" style="font-size:13px;color:#9da4ab;margin-bottom:10px;">${escapeHtml(gdlText('cards_remaining', '{count} cards remaining', { count: 0 }))}</div><div class="gdl-trading-card-grid">${cards}</div><a class="gdl-trading-cards-view-link" href="https://steamcommunity.com/my/gamecards/${steamAppId}/" data-gdl-open-url="https://steamcommunity.com/my/gamecards/${steamAppId}/" style="display:block;text-align:right;margin-top:14px;color:#9da4ab;text-decoration:none;font-size:13px;">${escapeHtml(gdlText('view_my_cards', 'View my cards'))}</a></div></div>`,
+		innerHtml: `<div class="${ACH_CLASSES().HighlightDiv} gdl-native-sidebar-panel" style="padding:0 !important;box-sizing:border-box;overflow:visible;"><div class="gdl-trading-cards-badge-header"><div class="gdl-trading-badge" title="${escapeHtml(badgeTitle)}"><img class="gdl-trading-badge-image" src="${escapeHtml(badgeSource)}" alt="${escapeHtml(badgeTitle)}" /></div><div style="min-width:0;"><div class="gdl-trading-badge-title" style="font-size:16px;line-height:1.25;color:#fff;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(badgeTitle)}</div><div class="gdl-trading-badge-xp" style="font-size:13px;color:#8f98a0;margin-top:2px;">${escapeHtml(catalog.generated ? genText(catalog.source === 'igdb' ? 'igdb' : 'achievements') : gdlText('experience_points', '100 XP'))}</div></div></div><div class="gdl-trading-cards-body" style="padding:12px 10px 14px;"><div class="gdl-trading-card-remaining" style="font-size:13px;color:#9da4ab;margin-bottom:10px;">${escapeHtml(catalog.generated ? genText('count', catalog.cards.length) : gdlText('cards_remaining', '{count} cards remaining', { count: 0 }))}</div><div class="gdl-trading-card-grid">${cards}</div>${catalog.generated ? '' : `<a class="gdl-trading-cards-view-link" href="https://steamcommunity.com/my/gamecards/${steamAppId}/" data-gdl-open-url="https://steamcommunity.com/my/gamecards/${steamAppId}/" style="display:block;text-align:right;margin-top:14px;color:#9da4ab;text-decoration:none;font-size:13px;">${escapeHtml(gdlText('view_my_cards', 'View my cards'))}</a>`}</div></div>`,
 		cloneInnerClass: false,
 	});
 	if (!candidate || !options.isCurrent() || !order.isCurrent()) return;
@@ -694,7 +708,7 @@ export async function renderOfficialTradingCards(
 		help.textContent = '?';
 		help.setAttribute('aria-label', gdlText('trading_cards', 'Trading Cards'));
 		text.appendChild(help);
-		setupTradingCardsHelpTooltip(doc, help);
+		setupTradingCardsHelpTooltip(doc, help, !!catalog.generated);
 
 		const headingChildren = Array.from(heading.children) as HTMLElement[];
 		const textRoot = headingChildren.find(child => child === text || child.contains(text)) || null;

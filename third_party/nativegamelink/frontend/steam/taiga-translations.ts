@@ -25,6 +25,10 @@ const english: Record<string, string> = {
 	feed_season: 'Season',
 	feed_community: 'Community',
 	game_artwork_picker_api_key: 'Add your SteamGridDB API key in Taiga Launcher settings first.',
+	taiga_ach_xbox_login: "Sign in with your Microsoft account in Taiga Launcher (Accounts) to see this game's Xbox achievements.",
+	taiga_ach_login: "Connect the store account in Taiga Launcher (Accounts) to see this game's achievements.",
+	taiga_ach_unmapped: "This game's achievements haven't shown up in your account yet. Open the game once and try again.",
+	taiga_ach_offline: "Couldn't load the achievements right now. Try again in a moment.",
 };
 
 const spanish: Record<string, string> = {
@@ -33,6 +37,10 @@ const spanish: Record<string, string> = {
 	feed_content: 'Nuevo contenido',
 	game_artwork_picker_api_key: 'Primero añade tu clave de API de SteamGridDB en los ajustes de Taiga Launcher.',
 	game_artwork_picker_reset_success: 'Artwork predeterminado restaurado.',
+	taiga_ach_xbox_login: 'Inicia sesión con tu cuenta de Microsoft en Taiga Launcher (Cuentas) para ver los logros de Xbox de este juego.',
+	taiga_ach_login: 'Conecta la cuenta de la tienda en Taiga Launcher (Cuentas) para ver los logros de este juego.',
+	taiga_ach_unmapped: 'Los logros de este juego aún no aparecen en tu cuenta. Abre el juego una vez e inténtalo de nuevo.',
+	taiga_ach_offline: 'No se pudieron cargar los logros ahora. Inténtalo de nuevo en un momento.',
 };
 
 // Unidades de tempo do Big Picture (antes iam sempre em inglês).

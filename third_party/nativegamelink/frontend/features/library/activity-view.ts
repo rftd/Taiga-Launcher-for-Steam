@@ -7,6 +7,9 @@ import { GDL_INJECTED } from './constants';
 import { newsItemsSignature } from './news';
 import type { NativeLibraryLayout } from './layout';
 import { renderUnifiedActivityFeedSnapshot, setupStatusPostBox } from './social';
+import { mountOnlineComments } from './social/online-comments';
+import { mountTaigaExtrasTracked } from './social/taiga-extras';
+import { isTaigaVirtualAppId } from '../../core/taiga';
 
 export interface ActivityViewOptions {
 	steamAppId: string;
@@ -57,7 +60,8 @@ export function refreshActivityNewsLink(doc: Document, options: ActivityViewOpti
 		.sort((a, b) => Number(b.date || 0) - Number(a.date || 0))[0];
 	button.dataset.gdlOpenUrl = latest?.url || '';
 	button.textContent = gdlText('latest_news', loc('AppActivity_ViewLatestNews', 'View latest news'));
-	row.style.display = latest && !steamUIModeService.isGamepadUI(doc) ? '' : 'none';
+	// Jogos do Taiga sem página na Steam (emuladores, ports): sem "Ver as últimas notícias" (não há notícias).
+	row.style.display = latest && !steamUIModeService.isGamepadUI(doc) && !isTaigaVirtualAppId(options.steamAppId) ? '' : 'none';
 }
 
 export function createActivityView(
@@ -125,6 +129,9 @@ export function createActivityView(
 export function wireActivityView(doc: Document, wrapper: HTMLElement, options: ActivityViewOptions): void {
 	refreshActivityNewsLink(doc, options);
 	setupStatusPostBox(doc, wrapper, options.steamAppId, options.shortcutAppId, options.newsItems, options.headerImage);
+	// Taiga Launcher: comentários online de quem tem o mesmo jogo (só nos jogos sem página na Steam).
+	try { mountOnlineComments(doc, wrapper, options.shortcutAppId); } catch {}
+	try { mountTaigaExtrasTracked(doc, wrapper, options.steamAppId, options.shortcutAppId, options.newsItems, options.headerImage); } catch {}
 }
 
 export function disposeSharedActivityComposer(doc: Document): void { sharedComposers.delete(doc); }

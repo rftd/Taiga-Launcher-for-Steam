@@ -10,7 +10,7 @@
 </p>
 
 <h2 align="center">
-  <a href="https://github.com/GabrielTaiga/Taiga-Launcher-for-Steam/releases/tag/v2.3.13">Download</a>
+  <a href="https://github.com/GabrielTaiga/Taiga-Launcher/releases/latest">Download</a>
 </h2>
 
 <p align="center">
@@ -126,6 +126,7 @@ Every unlock shows the **native Steam achievement notification**, with sound.
 - **Starts with Windows**, minimized to the tray, so Steam always shows the custom pages.
 - **Updates itself** with one click.
 - **Edit your other Steam games' artwork** from the Steam Library tab.
+- **Store games you have not installed**: your Epic and Xbox games show up in Steam with an **Install** button. Epic games download with progress and Cancel right on the Steam page (through Legendary); Xbox games open in the Xbox app. Optional collections per store ("Epic Games", "Xbox").
 - **Send to another PC**: creates a package with the program, without your games, accounts or logins.
 - **Remove everything** from Steam with one button. Your games and saves are never touched.
 
@@ -141,7 +142,7 @@ PPSSPP, PCSX2, DuckStation, ePSXe, RPCS3, Vita3K, shadPS4, Dolphin, Cemu, Ryujin
 
 **Linux (x86_64):** AppImage build and native/Flatpak Steam setup are documented in [Linux support](docs/LINUX.md). Real Steam integration on Linux still needs desktop validation.
 
-1. Download the `.zip` from the **[latest release](https://github.com/GabrielTaiga/Taiga-Launcher-for-Steam/releases/tag/v2.3.13)**.
+1. Download the `.zip` from the **[latest release](https://github.com/GabrielTaiga/Taiga-Launcher/releases/latest)**.
 2. Extract the whole folder wherever you like (for example `C:\Games\Taiga Launcher`). Keep the `.exe` together with the other files.
 3. Open **Taiga Launcher.exe**. A short setup asks for your language, your Steam account and where your games are.
 
@@ -189,7 +190,7 @@ Use **Report a problem** in the side menu, or open an [issue](https://github.com
 
 Taiga Launcher is free. If it made your library better, you can help it keep growing:
 
-<a href="https://github.com/sponsors/GabrielTaiga"><img src="https://img.shields.io/badge/Sponsor%20on%20GitHub-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="Sponsor on GitHub"></a>
+<a href="https://ko-fi.com/gabrieltaiga"><img src="https://img.shields.io/badge/Support%20on%20Ko--fi-FF5E5B?style=for-the-badge&logo=kofi&logoColor=white" alt="Support on Ko-fi"></a> <a href="https://github.com/sponsors/GabrielTaiga"><img src="https://img.shields.io/badge/Sponsor%20on%20GitHub-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="Sponsor on GitHub"></a>
 
 Starring the repository ⭐ also helps a lot.
 
@@ -200,6 +201,7 @@ Starring the repository ⭐ also helps a lot.
 Created by **Taiga ([GabrielTaiga](https://github.com/GabrielTaiga))**.
 
 - **NativeGameLink for Steam** by David Miranda (Davidjarod11, MIT): the base of the game page inside Steam.
+- **Legendary** (legendary-gl, GPL-3.0): installs Epic games. Downloaded only when you install one, as a separate program.
 - **Electron** and **Chromium**: the program's foundation.
 - **QR Code Generator** by Kazuhiko Arase (MIT), **Manrope** and **Sora** fonts (SIL OFL).
 - Data from **SteamGridDB, IGDB, RetroAchievements, libretro, Wikipedia / Wikidata, PCGamingWiki, Exophase** and the **Steam store**.

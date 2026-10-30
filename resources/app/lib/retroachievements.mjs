@@ -58,6 +58,15 @@ export class RetroAchievements {
    return out;
   });
  }
+ // Lista de jogos (id → nome) de um console, sem chave: a mesma que os emuladores usam (r=gameslist). 7 dias em cache.
+ async gamesList(consoleId) {
+  if (!consoleId) return {};
+  return this.cached('ra-gameslist-' + Number(consoleId), 7 * 86400000, async () => {
+   const data = await this.call({r: 'gameslist', c: String(consoleId)}, {method: 'GET', timeout: 60000});
+   const out = {}; for (const [id, title] of Object.entries(data?.Response || {})) if (Number(id) > 0 && title) out[id] = String(title);
+   return out;
+  });
+ }
  async gameIdForHash(hash, consoleId) {
   if (!/^[a-f0-9]{32}$/i.test(hash || '')) return null;
   try { const lib = await this.hashLibrary(consoleId); if (lib[hash.toLowerCase()]) return lib[hash.toLowerCase()]; } catch {}

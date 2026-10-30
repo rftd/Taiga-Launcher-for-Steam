@@ -12,6 +12,8 @@ import {
 } from '../../../steam/social';
 import { getCachedPersona } from './personas';
 import { socialRuntimeHost } from './host';
+import { isTaigaVirtualAppId } from '../../../core/taiga';
+import { renderTaigaActivity, taigaActivityFor, taigaActivitySignature, type TaigaActivity } from './taiga-extras';
 
 export interface LocalActivityComment {
 	id: string;
@@ -445,6 +447,7 @@ export function activityFeedContentSignature(
 			hash = hashFeedPart(hash, value);
 		}
 	}
+	hash = hashFeedPart(hash, taigaActivitySignature(steamAppId, shortcutAppId));
 	return `${effectiveNews.length}:${posts.length}:${effectiveFriendItems.length}:${rawLegacy.length}:${(hash >>> 0).toString(16)}`;
 }
 
@@ -511,12 +514,15 @@ export function renderUnifiedActivityFeed(
 	type FeedItem =
 		| { type: 'post'; post: LocalActivityPost; date: number }
 		| { type: 'news'; item: NewsItem; date: number }
-		| { type: 'friend'; item: FriendActivityFeedItem; date: number };
+		| { type: 'friend'; item: FriendActivityFeedItem; date: number }
+		| { type: 'taiga'; item: TaigaActivity; date: number };
 
 	const allItems: FeedItem[] = [
 		...localPosts.map(p => ({ type: 'post' as const, post: p, date: p.timestamp })),
 		...sortedNews.slice(0, visibleNews).map(item => ({ type: 'news' as const, item, date: Number(item.date || 0) })),
 		...friendItems.map(f => ({ type: 'friend' as const, item: f, date: f.date })),
+		// Taiga Launcher: sua atividade no jogo (conquistas, sessões e marcos).
+		...taigaActivityFor(steamAppId, shortcutAppId).map(item => ({ type: 'taiga' as const, item, date: item.at })),
 	].sort((a, b) => b.date - a.date);
 
 	if (allItems.length === 0 && !legacyFriendHtml) {
@@ -586,6 +592,8 @@ export function renderUnifiedActivityFeed(
 						</form>
 					</div>
 				</div>`;
+			} else if (entry.type === 'taiga') {
+				feedHtml += renderTaigaActivity(entry.item);
 			} else if (entry.type === 'friend') {
 				feedHtml += entry.item.html;
 			} else {
@@ -620,7 +628,8 @@ export function renderUnifiedActivityFeed(
 	if (endReached && visibleNews < sortedNews.length) {
 		activityEndReached.delete(steamAppId);
 	}
-	if (activityEndReached.get(steamAppId) === true) {
+	// Jogos do Taiga sem página na Steam: não há mais notícias para buscar, então a lista já termina aqui.
+	if (activityEndReached.get(steamAppId) === true || (isTaigaVirtualAppId(steamAppId) && visibleNews >= sortedNews.length)) {
 		feedHtml += `<div class="gdl-activity-end"><span>${escapeHtml(gdlText('activity_end', 'End of activity'))}</span></div>`;
 	} else {
 		feedHtml += `<div class="gdl-load-more-row"><button type="button" class="${FEED_CLASSES().FetchMoreContainer} gdl-load-more-activity">${escapeHtml(gdlText('fetch_more', loc('AppActivity_FetchMore', 'Load more activity')))}</button></div>`;

@@ -54,6 +54,7 @@ try {
   $new = Join-Path $dest ${q(exeName)}; $old = Join-Path $dest 'TaigaPSP.exe'
   if ((Test-Path -LiteralPath $new) -and (Test-Path -LiteralPath $old)) { Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue }
   Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
   Note "Atualizado a partir de $zip"
   Start-Process -FilePath $new
 } catch {

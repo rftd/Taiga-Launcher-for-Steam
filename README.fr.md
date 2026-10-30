@@ -126,6 +126,7 @@ Chaque déblocage s'affiche avec la **notification native des succès Steam**, a
 - **Se lance avec Windows**, réduit dans la zone de notification, pour que Steam affiche toujours les pages personnalisées.
 - **Se met à jour** en un clic.
 - **Modifiez les visuels de vos autres jeux Steam** depuis l'onglet Bibliothèque Steam.
+- **Jeux des boutiques non installés** : vos jeux Epic et Xbox apparaissent dans Steam avec un bouton **Installer**. Les jeux Epic se téléchargent avec progression et Annuler directement sur la page Steam (via Legendary) ; les jeux Xbox s'ouvrent dans l'app Xbox. Collections séparées par boutique (« Epic Games », « Xbox ») en option.
 - **Envoyer vers un autre PC** : crée un paquet avec le programme, sans vos jeux, comptes ni identifiants.
 - **Retirez tout** de Steam en un bouton. Vos jeux et sauvegardes ne sont jamais touchés.
 
@@ -187,7 +188,7 @@ Utilisez **Signaler un problème** dans le menu latéral, ou ouvrez une [issue](
 
 Taiga Launcher est gratuit. S'il a amélioré votre bibliothèque, vous pouvez l'aider à grandir :
 
-<a href="https://github.com/sponsors/GabrielTaiga"><img src="https://img.shields.io/badge/Soutenir%20sur%20GitHub-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="Soutenir sur GitHub"></a>
+<a href="https://ko-fi.com/gabrieltaiga"><img src="https://img.shields.io/badge/Soutenir%20sur%20Ko--fi-FF5E5B?style=for-the-badge&logo=kofi&logoColor=white" alt="Soutenir sur Ko-fi"></a> <a href="https://github.com/sponsors/GabrielTaiga"><img src="https://img.shields.io/badge/Soutenir%20sur%20GitHub-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="Soutenir sur GitHub"></a>
 
 Mettre une étoile ⭐ au dépôt aide aussi beaucoup.
 
@@ -198,6 +199,7 @@ Mettre une étoile ⭐ au dépôt aide aussi beaucoup.
 Créé par **Taiga ([GabrielTaiga](https://github.com/GabrielTaiga))**.
 
 - **NativeGameLink for Steam**, de David Miranda (Davidjarod11, MIT) : la base de la page du jeu dans Steam.
+- **Legendary** (legendary-gl, GPL-3.0) : installe les jeux Epic. Téléchargé seulement quand vous en installez un, comme programme séparé.
 - **Electron** et **Chromium** : la base du programme.
 - **QR Code Generator**, de Kazuhiko Arase (MIT), et les polices **Manrope** et **Sora** (SIL OFL).
 - Données de **SteamGridDB, IGDB, RetroAchievements, libretro, Wikipédia / Wikidata, PCGamingWiki, Exophase** et de la **boutique Steam**.

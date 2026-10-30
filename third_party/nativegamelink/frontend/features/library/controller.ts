@@ -352,7 +352,7 @@ export function subscribeControllerChanges(doc: Document, onChange: (info: Conne
 
 	// Native events handle immediate changes; one watchdog also catches devices
 	// that power down without delivering a browser connection event.
-	const timer = setInterval(check, 250);
+	const timer = setInterval(check, 1000);
 
 	return () => {
 		if (disposed) return;

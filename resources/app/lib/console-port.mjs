@@ -9,7 +9,9 @@ const isFile = f => { try { return fs.statSync(f).isFile(); } catch { return fal
 const isDir = f => { try { return fs.statSync(f).isDirectory(); } catch { return false; } };
 const list = d => { try { return fs.readdirSync(d, {withFileTypes: true}); } catch { return []; } };
 // Extratores de PKG gravam os arquivos de sistema em Sc0/ (param.sfo, trophy/) em vez de sce_sys/.
-const SFO_AT = d => [path.join(d, 'sce_sys', 'param.sfo'), path.join(d, 'Sc0', 'param.sfo'), path.join(d, 'PS3_GAME', 'PARAM.SFO'), path.join(d, 'PARAM.SFO')];
+const SFO_AT = d => [path.join(d, 'sce_sys', 'param.sfo'), path.join(d, 'Sc0', 'param.sfo'), path.join(d, 'PS3_GAME', 'PARAM.SFO'), path.join(d, 'PARAM.SFO'),
+ // Ports ps3recomp (Yakuza Dead Souls, inFAMOUS...): o disco fica em gamedata/dev_bdvd/PS3_GAME.
+ path.join(d, 'gamedata', 'dev_bdvd', 'PS3_GAME', 'PARAM.SFO'), path.join(d, 'dev_bdvd', 'PS3_GAME', 'PARAM.SFO')];
 const CODE = /\b(CUSA|PPSA|BLUS|BLES|BCUS|BCES|NPUB|NPEB|NPUA|NPEA|PCSA|PCSE|PCSB|ULUS|ULES|UCUS|UCES)\d{5}\b/i;
 
 function readSfo(file) {

@@ -31,3 +31,19 @@ test('RetroArch and Dolphin accounts are read from Flatpak and native XDG config
  const env={HOME:root,XDG_CONFIG_HOME:path.join(root,'xdg')};let accounts=emulatorAccounts({},env);assert.equal(accounts.length,2);assert.ok(accounts.some(a=>a.emulator==='RetroArch'));assert.ok(accounts.some(a=>a.emulator==='Dolphin'));assert.ok(!JSON.stringify(publicAccounts(accounts)).includes(token));
  file('xdg/retroarch/retroarch.cfg','cheevos_username = "NativePlayer"\ncheevos_token = "'+token+'"');accounts=emulatorAccounts({},env);assert.equal(accounts.length,3);
 });
+
+test('Upstream RetroArch core metadata and retroarchFirst preference also work with Flatpak',async t=>{
+ const {retroArchPlatforms,clearRetroArchCache}=await import('../lib/retroarch.mjs');
+ const {preferredProfile}=await import('../lib/emulator-registry.mjs');
+ const {root,file}=setup(t),exe=file('bin/flatpak');
+ file('.var/app/org.libretro.RetroArch/config/retroarch/cores/snes9x_libretro.so');
+ file('.var/app/org.libretro.RetroArch/config/retroarch/cores/mgba_libretro.dll');
+ file('.var/app/org.libretro.RetroArch/config/retroarch/cores/custom_libretro.so');
+ file('.var/app/org.libretro.RetroArch/config/retroarch/info/custom_libretro.info','database = "Sega - Game Gear"');
+ const launcher={exe,home:root,env:{HOME:root},platform:'linux',flatpakId:'org.libretro.RetroArch'};
+ clearRetroArchCache();t.after(clearRetroArchCache);
+ assert.ok(retroArchPlatforms(exe,launcher).includes('Super Nintendo Entertainment System'));
+ assert.ok(!retroArchPlatforms(exe,launcher).includes('Game Boy Advance'));
+ assert.ok(retroArchPlatforms(exe,launcher).includes('Sega Game Gear'));
+ assert.equal(preferredProfile({profile:'snes9x',platformName:'Super Nintendo Entertainment System'},{preferences:{retroarchFirst:true},launchers:{retroarch:launcher}}),'retroarch');
+});

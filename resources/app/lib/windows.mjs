@@ -8,15 +8,19 @@ const run=promisify(execFile),here=path.dirname(fileURLToPath(import.meta.url));
 export async function ps(code){if(process.platform!=='win32')throw Error('Esta operação requer Windows.');const {stdout}=await run('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(code,'utf16le').toString('base64')],{windowsHide:true,maxBuffer:4*1024*1024});return stdout.trim();}
 export async function detectSteam(){if(process.platform==='linux')return linux.detectSteam();try{return await ps("(Get-ItemProperty 'HKCU:\\Software\\Valve\\Steam').SteamPath");}catch{return '';}}
 export async function steamLocation(selected){if(process.platform==='linux'){if(fs.existsSync(selected)&&fs.statSync(selected).isDirectory())return selected;if(['steam','steam.sh'].includes(path.basename(selected)))return await detectSteam()||path.dirname(selected);throw Error('Selecione a pasta de dados da Steam ou steam.sh.');}let target=selected;if(path.extname(selected).toLowerCase()==='.lnk'){const literal=selected.replaceAll("'","''");target=await ps("(New-Object -ComObject WScript.Shell).CreateShortcut('"+literal+"').TargetPath");}if(fs.existsSync(target)&&fs.statSync(target).isDirectory())return target;if(path.basename(target).toLowerCase()!=='steam.exe')throw Error('Selecione a pasta da Steam, steam.exe ou um atalho para steam.exe.');return path.dirname(target);}
-export async function running(){if(process.platform==='linux')return linux.processes().some(p=>p.name==='steam');if(process.platform!=='win32')return false;return (await ps("if(Get-Process steam -ErrorAction SilentlyContinue){'yes'}else{'no'}"))==='yes';}
+// Steam aberta? Pelo tasklist (leve) em vez de um PowerShell inteiro; a resposta vale 3 s e pedidos juntos dividem a
+// mesma consulta. fresh: consulta agora (usado ao fechar/abrir a Steam).
+let runCache={at:0,value:false},runPending=null;
+export async function processRunning(image){if(process.platform!=='win32')return false;try{const {stdout}=await run('tasklist.exe',['/FI','IMAGENAME eq '+image,'/FO','CSV','/NH'],{windowsHide:true,timeout:10000});return String(stdout).toLowerCase().includes('"'+image.toLowerCase()+'"');}catch{return (await ps("if(Get-Process "+image.replace(/\.exe$/i,'')+" -ErrorAction SilentlyContinue){'yes'}else{'no'}").catch(()=>'no'))==='yes';}}
+export async function running({fresh=false}={}){if(process.platform==='linux')return linux.processes().some(p=>p.name==='steam');if(process.platform!=='win32')return false;if(!fresh&&Date.now()-runCache.at<3000)return runCache.value;if(runPending)return runPending;runPending=processRunning('steam.exe').then(v=>{runCache={at:Date.now(),value:v};return v;}).finally(()=>{runPending=null;});return runPending;}
 export async function stopSteam(dir){
- if(!await running())return;
+ if(!await running({fresh:true}))return;
  const command=process.platform==='linux'?linux.steamCommand(dir,['-shutdown']):{exe:path.join(dir,'steam.exe'),args:['-shutdown']};
  await run(command.exe,command.args,{windowsHide:true,timeout:15000}).catch(()=>{});
- const deadline=Date.now()+45000;while(Date.now()<deadline){if(!await running()){
+ const deadline=Date.now()+45000;while(Date.now()<deadline){if(!await running({fresh:true})){
   // A porta de depuração pertence ao steamwebhelper: espera ele fechar também, senão a Steam nova não consegue abri-la.
   if(process.platform==='linux')return;
-  const helperDeadline=Date.now()+12000;while(Date.now()<helperDeadline&&(await ps("if(Get-Process steamwebhelper -ErrorAction SilentlyContinue){'yes'}else{'no'}").catch(()=>'no'))==='yes')await new Promise(r=>setTimeout(r,500));
+  const helperDeadline=Date.now()+12000;while(Date.now()<helperDeadline&&await processRunning('steamwebhelper.exe'))await new Promise(r=>setTimeout(r,500));
   return;}await new Promise(r=>setTimeout(r,500));}
  throw Error('A Steam ainda está aberta. Encerre normalmente pelo menu Steam > Sair e tente novamente.');
 }

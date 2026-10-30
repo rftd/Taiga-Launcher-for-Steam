@@ -126,6 +126,7 @@ Cada desbloqueo aparece con la **notificación nativa de logros de Steam**, con 
 - **Se inicia con Windows**, minimizado en la bandeja, para que Steam siempre muestre las páginas personalizadas.
 - **Se actualiza solo** con un clic.
 - **Edita el arte de tus otros juegos de Steam** desde la pestaña Biblioteca de Steam.
+- **Juegos de tiendas que no instalaste**: tus juegos de Epic y Xbox aparecen en Steam con el botón **Instalar**. Los de Epic se descargan con progreso y Cancelar en la propia página de Steam (con Legendary); los de Xbox se abren en la app Xbox. Colecciones separadas por tienda ("Epic Games", "Xbox"), si quieres.
 - **Enviar a otro PC**: crea un paquete con el programa, sin tus juegos, cuentas ni inicios de sesión.
 - **Quita todo** de Steam con un botón. Tus juegos y partidas guardadas nunca se tocan.
 
@@ -187,7 +188,7 @@ Usa **Informar un problema** en el menú lateral o abre un [issue](https://githu
 
 Taiga Launcher es gratuito. Si mejoró tu biblioteca, puedes ayudar a que siga creciendo:
 
-<a href="https://github.com/sponsors/GabrielTaiga"><img src="https://img.shields.io/badge/Apoyar%20en%20GitHub-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="Apoyar en GitHub"></a>
+<a href="https://ko-fi.com/gabrieltaiga"><img src="https://img.shields.io/badge/Apoyar%20en%20Ko--fi-FF5E5B?style=for-the-badge&logo=kofi&logoColor=white" alt="Apoyar en Ko-fi"></a> <a href="https://github.com/sponsors/GabrielTaiga"><img src="https://img.shields.io/badge/Apoyar%20en%20GitHub-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="Apoyar en GitHub"></a>
 
 Darle una estrella ⭐ al repositorio también ayuda mucho.
 
@@ -198,6 +199,7 @@ Darle una estrella ⭐ al repositorio también ayuda mucho.
 Creado por **Taiga ([GabrielTaiga](https://github.com/GabrielTaiga))**.
 
 - **NativeGameLink for Steam**, de David Miranda (Davidjarod11, MIT): la base de la página del juego dentro de Steam.
+- **Legendary** (legendary-gl, GPL-3.0): instala los juegos de Epic. Solo se descarga cuando instalas uno, como un programa aparte.
 - **Electron** y **Chromium**: la base del programa.
 - **QR Code Generator**, de Kazuhiko Arase (MIT), y las fuentes **Manrope** y **Sora** (SIL OFL).
 - Datos de **SteamGridDB, IGDB, RetroAchievements, libretro, Wikipedia / Wikidata, PCGamingWiki, Exophase** y la **tienda de Steam**.

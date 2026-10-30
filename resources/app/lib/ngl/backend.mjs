@@ -27,7 +27,9 @@ const GENRES = {
 const genreName = (name, lang) => { const i = {'pt-BR': 0, es: 1, fr: 2, de: 3}[lang]; const row = GENRES[String(name)]; return i === undefined || !row ? String(name) : row[i]; };
 // Resumo curto sem cortar no meio da frase.
 const clipSentence = (text, max) => { text = String(text || ''); if (text.length <= max) return text; const cut = text.slice(0, max), end = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('! '), cut.lastIndexOf('? ')); return end > max * 0.4 ? cut.slice(0, end + 1) : cut.slice(0, cut.lastIndexOf(' ')).replace(/[,;:\s]+$/, '') + '…'; };
-export const virtualAppIdFor = uuid => VIRTUAL_MIN + (parseInt(createHash('sha1').update(String(uuid)).digest('hex').slice(0, 8), 16) % (VIRTUAL_MAX - VIRTUAL_MIN));
+// Guardado em memória: é chamado para cada jogo em vários pedidos da página da Steam.
+const vidCache = new Map();
+export const virtualAppIdFor = uuid => { const k = String(uuid); let v = vidCache.get(k); if (v === undefined) { v = VIRTUAL_MIN + (parseInt(createHash('sha1').update(k).digest('hex').slice(0, 8), 16) % (VIRTUAL_MAX - VIRTUAL_MIN)); if (vidCache.size > 20000) vidCache.clear(); vidCache.set(k, v); } return v; };
 const UNSUPPORTED = JSON.stringify({ok: false, error: 'unsupported_in_taigasteam'});
 const imageMime = b => b && b.length > 100 ? (b[0] === 137 && b.toString('latin1', 1, 4) === 'PNG' ? 'image/png' : b[0] === 255 && b[1] === 216 ? 'image/jpeg' : b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP' ? 'image/webp' : null) : null;
 const trustedImageHost = url => /^https:\/\/([a-z0-9-]+\.)*(steamgriddb\.com|steamstatic\.com|steampowered\.com)(\/|$)/i.test(String(url || ''));
@@ -110,6 +112,16 @@ export function createNglBackend(host) {
  // ── shortcut_registry.lua / get_shortcut_details ──
  function diskShortcutIds() { try { const f = path.join(steamDir(), 'userdata', account(), 'config', 'shortcuts.vdf'); return new Set(fs.existsSync(f) ? shortcutInfo(parseVDF(fs.readFileSync(f))).map(s => s.appId >>> 0) : []); } catch { return new Set(); } }
  // Atalhos do shortcuts.vdf mais os jogos do Taiga Launcher já adicionados ao vivo (a Steam só grava o arquivo depois).
+ // Lista de atalhos (disco + jogos do Taiga): a mesma enquanto o shortcuts.vdf e o cadastro não mudarem. Antes o arquivo
+ // era lido e interpretado de novo a cada pedido da Steam.
+ let shortcutsMemo = null;
+ function shortcutsListCached() {
+  let st = null; try { st = fs.statSync(path.join(steamDir(), 'userdata', account(), 'config', 'shortcuts.vdf')); } catch {}
+  const games = host.games();
+  const key = [steamDir(), account(), st ? st.mtimeMs + ':' + st.size : '-', host.dataVersion?.() ?? '', games.length].join('|');
+  if (shortcutsMemo?.key === key) return shortcutsMemo.value;
+  const value = shortcutsList(); shortcutsMemo = {key, value}; return value;
+ }
  function shortcutsList() {
   const disk = diskShortcutsList(), have = new Set(disk.map(s => Number(s.shortcut_app_id)));
   for (const g of host.games()) { const sid = unsignedId(g.bindings?.[account()]); if (!sid || sid < 2147483648 || have.has(sid)) continue; have.add(sid); disk.push({shortcut_app_id: String(sid), title: String(g.title || '').trim(), exe_path: String(g.path || ''), start_dir: path.win32.dirname(String(g.path || '')), launch_options: '', source: 'taigasteam', account_id: account()}); }
@@ -135,13 +147,13 @@ export function createNglBackend(host) {
  async function detect(req) {
   const title = trim(req.title).slice(0, 240); let exe = trim(req.exe_path).replace(/^"(.*)"$/, '$1'), start = trim(req.start_dir).replace(/^"(.*)"$/, '$1'), options = trim(req.launch_options);
   const sid = unsignedId(req.shortcut_app_id);
-  if ((!exe || !start) && (sid || title)) { const s = shortcutsList().find(x => (sid && Number(x.shortcut_app_id) === sid) || normalizeTitle(x.title) === normalizeTitle(title)); if (s) { exe ||= s.exe_path; start ||= s.start_dir; options ||= s.launch_options; } }
+  if ((!exe || !start) && (sid || title)) { const s = shortcutsListCached().find(x => (sid && Number(x.shortcut_app_id) === sid) || normalizeTitle(x.title) === normalizeTitle(title)); if (s) { exe ||= s.exe_path; start ||= s.start_dir; options ||= s.launch_options; } }
   const lang = safeLanguage(req.language || 'english'), base = path.win32.basename(exe), stem = base.replace(/\.[^.]+$/, '');
   const launcher = /launcher|bootstrapper|start protected game/i.test(stem), generic = /^(game|start|play|launcher|main|app|client|run|shipping)$/i.test(stem);
   const result = extra => ({launcher_detected: launcher, generic_launcher: generic, executable: base, phase: req.phase === 'local' ? 'local' : 'all', validation_state: 'confirmed', ...extra});
   let own = sid ? host.shortcutGame(sid) : null;
   // Atalho de emulador criado pela própria Steam: o Taiga Launcher adota o jogo e responde com o AppID virtual dele.
-  if (!own && sid && host.adoptShortcut && req.phase !== 'local') { try { own = await host.adoptShortcut({sid, exe, startDir: start, options, title}); } catch {} }
+  if (!own && sid && host.adoptShortcut && (req.phase !== 'local' || /--taiga-launch\s/.test(options))) { try { own = await host.adoptShortcut({sid, exe, startDir: start, options, title}); } catch {} }
   if (own) { const appid = host.steamAppIdOf(own) || virtualAppIdFor(own.uuid || own.id); if (appid) return result({candidates: [{appid: String(appid), name: own.title, image: isVirtualAppId(appid) ? host.artUrl(own.art?.wide || own.art?.cover) : 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/' + appid + '/header.jpg', score: 100, confidence: 'exact', reasons: ['taigasteam_identified'], executable_match: true, direct: true, evidence_tier: 'proof'}], source: 'taigasteam'}); }
   const ev = evidenceAppId(exe, start, options);
   if (ev) { const d = req.phase === 'local' ? null : await appdetails(ev.appid, lang); return result({candidates: [{appid: ev.appid, name: d?.name || title || stem, image: d?.header_image || 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/' + ev.appid + '/header.jpg', score: 100, confidence: 'exact', reasons: [ev.source], executable_match: true, direct: true, evidence_tier: 'proof'}], source: ev.source}); }
@@ -322,7 +334,7 @@ export function createNglBackend(host) {
   if (!g) return {found: false, appid: metadataAppId, metadata_appid: metadataAppId, state_appid: stateAppId, unlocked: 0, total: 0, achievements: [], error: 'not_a_taigasteam_game'};
   let data; try { data = await host.achievements(g, {live: Number(req.max_age_ms) === 0 ? true : false}); } catch { data = host.cachedAchievements?.(g); }
   const list = (data?.achievements || []).map(a => ({name: String(a.id), display_name: a.title || String(a.id), description: a.description || '', icon: absUrl(a.icon), icon_gray: absUrl(a.lockedIcon || a.icon), hidden: !!a.hidden, global_percent: Number(a.globalPercent) || 0, global_percent_known: a.globalPercent !== null && a.globalPercent !== undefined, earned: !!a.unlocked, earned_time: a.unlocked ? dateSeconds(a.date) : 0, progress: Number(a.progress) || 0, max_progress: Number(a.maxProgress) || 0, is_online: false, client_writable: false}));
-  return {found: list.length > 0, appid: metadataAppId, metadata_appid: metadataAppId, state_appid: stateAppId, root: '', path: data?.progressFile || '', metadata_source: data?.source || 'Taiga Launcher', state_source: data?.provider || 'taigasteam', simulation_enabled: false, simulate_unlock_all: false, unlock_online: false, zero_progress: !list.some(a => a.earned), unlocked: list.filter(a => a.earned).length, total: list.length, achievements: list};
+  return {found: list.length > 0, appid: metadataAppId, metadata_appid: metadataAppId, state_appid: stateAppId, root: '', path: data?.progressFile || '', metadata_source: data?.source || 'Taiga Launcher', state_source: data?.provider || 'taigasteam', simulation_enabled: false, simulate_unlock_all: false, unlock_online: false, zero_progress: !list.some(a => a.earned), unlocked: list.filter(a => a.earned).length, total: list.length, achievements: list, taiga_status: list.length ? 'ok' : String(data?.status || 'unavailable'), taiga_provider: String(data?.provider || '')};
  }
 
  // ── playtime.lua ──
@@ -358,8 +370,8 @@ export function createNglBackend(host) {
   update_mappings: async args => { const r = decodeRequest(args); for (const [k, v] of Object.entries(r.set || {})) if (/^\d+$/.test(String(v))) setMapping(k, v); for (const k of Array.isArray(r.remove) ? r.remove : []) removeMapping(k, {sweep: r.explicit !== true}); return JSON.stringify({ok: true, data: allMappings()}); },
   get_all_mappings: async () => JSON.stringify(allMappings()),
   fetch_game_data: web.fetch_game_data,
-  get_shortcut_details: async ({shortcut_app_id, title} = {}) => { const id = unsignedId(shortcut_app_id); const s = shortcutsList().find(x => (id && Number(x.shortcut_app_id) === id) || (title && normalizeTitle(x.title) === normalizeTitle(title))); return JSON.stringify(s || {error: 'shortcut_not_found'}); },
-  list_shortcuts: async () => JSON.stringify({ok: true, shortcuts: shortcutsList(), account_id: account()}),
+  get_shortcut_details: async ({shortcut_app_id, title} = {}) => { const id = unsignedId(shortcut_app_id); const s = shortcutsListCached().find(x => (id && Number(x.shortcut_app_id) === id) || (title && normalizeTitle(x.title) === normalizeTitle(title))); return JSON.stringify(s || {error: 'shortcut_not_found'}); },
+  list_shortcuts: async () => JSON.stringify({ok: true, shortcuts: shortcutsListCached(), account_id: account()}),
   read_shortcut_logo_inventory: async args => { const r = decodeRequest(args); if (!Array.isArray(r.shortcuts)) return JSON.stringify({ok: false, error: 'invalid_request', entries: []}); const maps = allMappings(), entries = []; for (const it of r.shortcuts.slice(0, 128)) { const id = String(it?.shortcut_app_id || ''), steam = String(it?.steam_app_id || ''), mtime = Number(it?.native_mtime); if (!/^\d+$/.test(id) || Number(id) < 2147483648 || !/^\d+$/.test(steam) || !(mtime > 0)) continue; if (String(maps['shortcut:' + id] || '') !== steam || entries.some(e => e.shortcut_app_id === id)) continue; entries.push({shortcut_app_id: id, steam_app_id: steam, requested_native_mtime: mtime, png_exists: fs.existsSync(path.join(gridDir(), id + '_logo.png')), jpg_exists: fs.existsSync(path.join(gridDir(), id + '_logo.jpg'))}); } return JSON.stringify({ok: true, entries}); },
   detect_game_candidates: async args => JSON.stringify(await detect(decodeRequest(args))),
   detect_game_candidates_local: async args => JSON.stringify(await detect({...decodeRequest(args), phase: 'local'})),
@@ -405,6 +417,15 @@ export function createNglBackend(host) {
   restore_steam_appid_file: async () => JSON.stringify({ok: true, restored: false}),
   suppress_admin_prompt: async () => true,
   factory_reset: async args => { const r = decodeRequest(args); writeMappings({}); if (r.delete_playtime === true) { pt = {version: 2, sessions: {}, aliases: {}, offsets: {}}; savePt(); } return JSON.stringify({ok: true, deleted_playtime: r.delete_playtime === true}); },
+  // Taiga Launcher: jogos de loja não instalados (botões Instalar/Cancelar e progresso na página do jogo).
+  taiga_install_state: async ({shortcut_app_id} = {}) => { const g = host.shortcutGame?.(shortcut_app_id); if (!g || !host.install) return JSON.stringify({state: 'unknown'}); return JSON.stringify({...host.install.state(g), title: g.title}); },
+  taiga_install_start: async ({shortcut_app_id, via, dir, desktop, start_menu} = {}) => { const g = host.shortcutGame?.(shortcut_app_id); if (!g || !host.install) return JSON.stringify({state: 'unknown'}); try { return JSON.stringify(await host.install.start(g, {via: ['launcher', 'legendary'].includes(via) ? via : '', dir: typeof dir === 'string' ? dir : '', shortcuts: desktop !== undefined || start_menu !== undefined ? {desktop: !!desktop, startMenu: !!start_menu} : null})); } catch (e) { return JSON.stringify({state: 'error', error: String(e.message || e).slice(0, 300)}); } },
+  taiga_install_info: async ({shortcut_app_id, wait} = {}) => { const g = host.shortcutGame?.(shortcut_app_id); if (!g || !host.install?.info) return JSON.stringify({state: 'unknown'}); try { return JSON.stringify(await host.install.info(g, {wait: !!wait})); } catch (e) { return JSON.stringify({state: 'error', error: String(e.message || e).slice(0, 300)}); } },
+  taiga_install_pick_folder: async () => JSON.stringify({path: host.install?.pickFolder ? await host.install.pickFolder() : ''}),
+  taiga_virtual_cards: async ({steam_app_id} = {}) => { if (!host.virtualCards || !isVirtualAppId(String(steam_app_id || ''))) return JSON.stringify({cards: [], badges: []}); try { return JSON.stringify(await host.virtualCards(Number(steam_app_id)) || {cards: [], badges: []}); } catch (e) { return JSON.stringify({cards: [], badges: [], error: String(e.message || e).slice(0, 200)}); } },
+  taiga_install_ids: async () => JSON.stringify({items: host.install?.ids ? host.install.ids() : []}),
+  taiga_install_pause: async ({shortcut_app_id} = {}) => { const g = host.shortcutGame?.(shortcut_app_id); if (!g || !host.install?.pause) return JSON.stringify({state: 'unknown'}); return JSON.stringify(await host.install.pause(g)); },
+  taiga_install_cancel: async ({shortcut_app_id} = {}) => { const g = host.shortcutGame?.(shortcut_app_id); if (!g || !host.install) return JSON.stringify({state: 'unknown'}); return JSON.stringify(await host.install.cancel(g)); },
   fe_log: async ({msg} = {}) => { log('[NGL] ' + String(msg).slice(0, 2000)); return 'ok'; },
  };
  // Notícias que a Steam só tem em inglês: título e resumo traduzidos para o idioma do Taiga Launcher (cache permanente;

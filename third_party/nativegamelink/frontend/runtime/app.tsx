@@ -34,6 +34,7 @@ import {
 	stopFirstLaunchAchievementWatcher,
 } from '../features/achievements/runtime';
 import { startPlaytimeTracker, stopPlaytimeTracker } from '../features/playtime/tracker';
+import { startStoreInstallUi, stopStoreInstallUi } from '../features/library/store-install';
 import { isDesktopLibraryHomePlaytimeVisible, patchDesktopLibraryHomePlaytime, syncDesktopLibraryHomePlaytimeDom } from '../features/playtime/library-home';
 import { mutationMayContainDesktopPlaytime } from '../features/playtime/library-home-dom';
 import { processPendingLinkJobs } from '../features/shortcuts/link-job-queue';
@@ -259,6 +260,9 @@ function windowCreated(context: any): void {
 		'[id^="gdl-"], [data-gdl-hidden], [data-gdl-shortcut-app-id], [data-gdl-cloud-status], [data-gdl-cloud-stats], [data-gdl-playtime]');
 	// URL/DOM routes outrank pointerdown on an already-selected row and prevent cleanup flicker.
 	const observer = new MutationObserver((mutations) => {
+		// Janela escondida (Steam minimizada, por exemplo durante o jogo): nada é feito; ao voltar a aparecer, o
+		// "visibilitychange" abaixo refaz tudo de uma vez. Evita trabalho a cada mudança da Steam enquanto se joga.
+		if (popupDoc.hidden) return;
 		const records = (isMainWindow ? withoutLibrarySidebarMutations(mutations) : mutations).filter(record => !isGdlOnlyMutation(record));
 		if (isMainWindow) {
 			const roots = records.flatMap(record => Array.from(record.addedNodes));
@@ -443,6 +447,8 @@ export default definePlugin(() => {
 		deferStartup('achievement watcher fallback', () => startFirstLaunchAchievementWatcher(), 1100);
 	}); };
 	deferStartup('mapping hydration', hydrateMappingsAfterMount, 0);
+	// Taiga Launcher: botão Instalar e progresso dos jogos de loja não instalados.
+	deferStartup('store install', () => startStoreInstallUi(), 900);
 	let disposeMappingRefresh = (): void => {};
 	try { disposeMappingRefresh = installMappingRefresh({
 		getCurrentAppId: getCurrentInjectedAppId,
@@ -504,7 +510,7 @@ export default definePlugin(() => {
 			for (const timer of existingWindowAdoptionTimers) clearTimeout(timer);
 			disposeDocumentLifecycles(); unsubscribeLanguageRefresh(); unsubscribeUIMode();
 			steamUIModeService.dispose(); disposeMappingRefresh(); disposeLinkedGamePrefetch();
-			stopSteamLanguageWatcher(); stopNativeAddAutoDetector(); stopPlaytimeTracker();
+			stopSteamLanguageWatcher(); stopNativeAddAutoDetector(); stopPlaytimeTracker(); stopStoreInstallUi();
 			stopFirstLaunchAchievementWatcher(); deactivateBigPicture(); hasHadBigPictureSession = false; gamepadRuntime.invalidate(); disposeLibraryRuntime();
 			disposeAchievementRuntime(); clearNativeUiBlueprints(); resetResolvedCssClassModules();
 			steamComponents.clearCache(); disposeAllBrowserProtection();

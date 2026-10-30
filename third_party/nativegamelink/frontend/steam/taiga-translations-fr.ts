@@ -306,4 +306,8 @@ export const TAIGA_FR: Record<string, string> = {
 	steamgriddb_api_key_restored: 'La clé par défaut a été rétablie et vérifiée.',
 	steamgriddb_api_key_saved: 'La clé SteamGridDB a été enregistrée et vérifiée.',
 	steamgriddb_api_key_restore: 'Rétablir la clé par défaut',
+	taiga_ach_xbox_login: 'Connectez votre compte Microsoft dans Taiga Launcher (Comptes) pour voir les succès Xbox de ce jeu.',
+	taiga_ach_login: 'Connectez le compte de la boutique dans Taiga Launcher (Comptes) pour voir les succès de ce jeu.',
+	taiga_ach_unmapped: 'Les succès de ce jeu n’apparaissent pas encore dans votre compte. Lancez le jeu une fois et réessayez.',
+	taiga_ach_offline: 'Impossible de charger les succès pour le moment. Réessayez dans un instant.',
 };

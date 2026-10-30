@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
-import {spawn} from 'node:child_process';
+import {spawn,execFile} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {ensureWorkingDirectory} from './lib/working-directory.mjs';
 import {atomic,json,save,normalize,digest} from './lib/files.mjs';
@@ -19,6 +19,10 @@ import {exchangeCode,validSession} from './lib/epic-auth.mjs';
 import {createCommunity} from './lib/community.mjs';
 import {translateText,detectLanguage} from './lib/translation.mjs';
 import {createPublicProfile,profileServerUrl} from './lib/public-profile.mjs';
+import {createHousekeeping} from './lib/housekeeping.mjs';
+import {createComments,gameCommentKey,commentTitle,commentLang} from './lib/comments.mjs';
+import {buildActivity as buildGameActivity,createGameExtras} from './lib/game-extras.mjs';
+import {portProfile} from './lib/port-profiles.mjs';
 import {createNglBackend,encodeCallResult,virtualAppIdFor} from './lib/ngl/backend.mjs';
 import {executableTitle} from './lib/executable-title.mjs';
 import {SteamCommunity} from './lib/steam-community.mjs';
@@ -38,8 +42,10 @@ import {hostLaunch} from './lib/linux.mjs';
 import localeRuntime from './locales/runtime.cjs';
 import {iconSourceFor} from './lib/exe-icon-source.mjs';
 import {directPlay} from './lib/port-launch.mjs';
+import {retroArchPlatforms,clearRetroArchCache,retroArchCoreFor} from './lib/retroarch.mjs';
+import {MODERN} from './lib/emulator-registry.mjs';
 import {emulatorFile,defaultDiscoveryRoots,applyDiscovery,preferredProfile,launcherSettings,detectedArguments,guessProfile,emulatorDisplayName,PROFILES as REGISTRY_PROFILES} from './lib/emulator-registry.mjs';
-import {SessionStore,UUID,defaultDataDir} from './lib/launch-engine.mjs';
+import {SessionStore,UUID,defaultDataDir,portCaptureFile} from './lib/launch-engine.mjs';
 import {JobQueue} from './lib/job-queue.mjs';
 import {LibraryWatcher} from './lib/library-watcher.mjs';
 import {gameStatus} from './lib/game-status.mjs';
@@ -50,7 +56,10 @@ import {identifyLocal,identifyPC,displayTitle,steamAppByName,steamAppIdEvidence}
 import {scoreCandidate,confidentChoice,normalizeTitle} from './lib/title-match.mjs';
 import {isMainEntry,preferredPlatform} from './lib/external.mjs';
 import {publicAccounts} from './lib/emulator-accounts.mjs';
-import {scanStores,explorer,scanEpic,regQuery} from './lib/stores.mjs';
+import {scanStores,explorer,scanEpic,regQuery,setLegendaryExe} from './lib/stores.mjs';
+import {epicLibrary,xboxLibrary,xboxStoreLink,epicInstallLink} from './lib/store-library.mjs';
+import {Legendary} from './lib/legendary.mjs';
+import {cardSet,cardSvg} from './lib/cards.mjs';
 import {findInstalledGames} from './lib/installed-games.mjs';
 import {guessNames,guessSteamGame} from './lib/title-guess.mjs';
 import {consoleTitleNear} from './lib/console-port.mjs';
@@ -70,10 +79,10 @@ import {StoreAchievements,parseEpicAccount,gogProductId} from './lib/store-achie
 import {downloadable,downloadEmulator} from './lib/emulator-download.mjs';
 import {discoverGameFolders,sweepRoots,emulatorSearchRoots,emulatorGameFolders,collapseFolders,windowsDrives} from './lib/discover.mjs';
 import {lnkTarget} from './lib/lnk.mjs';
-export const VERSION='2.3.13';
+export const VERSION='3.1.4';
 const ROOT=path.dirname(fileURLToPath(import.meta.url));
 export function pickSystemLanguage(list){const first=(Array.isArray(list)?list:[list]).map(x=>String(x||'').trim().toLowerCase()).find(Boolean);if(!first)return 'pt-BR';const base=first.split(/[-_]/)[0];return base==='pt'?'pt-BR':['es','fr','de','en'].includes(base)?base:'en';}
-export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,launcherExecutable=null,onLanguageChange=null,onStartupChange=null,systemLanguages=null,brandFetch=null,xboxLogin=null,readShortcut=null,fileIcon=null,installedRegQuery=null,onAchievementUnlocked=null,onOpenManager=null,startInjector=false,injectorOptions={},onSteamNeedsIntegration=null,epicLogin=null,pageFetch=null,secretBox=null,psnLogin=null,onApplyUpdate=null,imageThumb=null,heroFromCover=null,iconResize=null,imageValidate=null,imageConvert=null,demoExecutable=process.execPath,providersFactory=(cfg,dir)=>new Providers(cfg,dir,{convertImage:imageConvert,heroFromCover,defaultServer:(()=>{try{return String(JSON.parse(fs.readFileSync(path.join(ROOT,'package.json'),'utf8')).taigaServer||'');}catch{return '';}})()})}={}){
+export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,launcherExecutable=null,onLanguageChange=null,onStartupChange=null,systemLanguages=null,brandFetch=null,xboxLogin=null,readShortcut=null,fileIcon=null,installedRegQuery=null,onAchievementUnlocked=null,onOpenManager=null,startInjector=false,injectorOptions={},onSteamNeedsIntegration=null,epicLogin=null,pageFetch=null,secretBox=null,psnLogin=null,onApplyUpdate=null,imageThumb=null,imageCompress=null,heroFromCover=null,iconResize=null,imageValidate=null,imageConvert=null,demoExecutable=process.execPath,providersFactory=(cfg,dir)=>new Providers(cfg,dir,{convertImage:imageConvert,compressImage:imageCompress,heroFromCover,defaultServer:(()=>{try{return String(JSON.parse(fs.readFileSync(path.join(ROOT,'package.json'),'utf8')).taigaServer||'');}catch{return '';}})()})}={}){
  fs.mkdirSync(dataDir,{recursive:true});
  ensureWorkingDirectory(dataDir);
  const configFile=path.join(dataDir,'config.json'),dbFile=path.join(dataDir,'games.json');
@@ -84,7 +93,7 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
  if(!config.adminToken)config.adminToken=crypto.randomBytes(32).toString('hex');if(!config.readToken)config.readToken=crypto.randomBytes(32).toString('hex');
  let db=json(dbFile,{version:1,games:[]});if(db.version!==1||!Array.isArray(db.games))throw Error('Banco inválido; restaure um backup antes de continuar.');
  saveConfig();
- config.preferences={startWithWindows:true,autoLookup:true,closeSteam:true,scanOnStart:true,watchFolders:true,autoDiscover:true,theme:'dark',autoCollection:true,autoSync:true,...(config.preferences||{})};
+ config.preferences={startWithWindows:true,autoLookup:true,closeSteam:true,scanOnStart:true,watchFolders:true,autoDiscover:true,theme:'dark',autoCollection:false,autoSync:true,showUninstalled:true,emuCollection:true,...(config.preferences||{})};
  // 1.7.0: o visual novo é claro; quem estava no padrão ("igual ao sistema") passa para o claro uma vez.
  // 1.8.2: o tema padrão é o escuro; uma vez, todos passam para o escuro (dá para trocar depois).
  if(!config.designV18){config.preferences.theme='dark';config.designV17=true;config.designV18=true;saveConfig();}
@@ -96,18 +105,173 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
  // direto no jogo), sem mexer nos que o usuário escreveu à mão.
  try{let n=0;for(const [p,l] of Object.entries(config.launchers||{})){if(!l?.exe||!(l.argsSource==='detected'||l.source==='detected'))continue;let a;try{a=detectedArguments(p,l.exe);}catch{continue;}if(a&&a!==l.args){l.args=a;n++;}}if(n)saveConfig();}catch{}
  const locale=localeRuntime.create(config.language||sysLang);
- const achievementManager=new AchievementProviderManager({psnSession:()=>validPsn(config.psnAuth,{save:next=>{config.psnAuth=next;saveConfig();}}),pageFetch,log:m=>nglNote('[conquistas] '+m),xboxSession:()=>validXbox(config.xboxAuth,{save:next=>{config.xboxAuth=next;saveConfig();}}),epicSession:()=>validSession(config.epicAuth,{save:next=>{config.epicAuth=next;saveConfig();}}),config:()=>config,dir:dataDir,providers,stores:new StoreAchievements({dir:dataDir,offline:!!process.env.TAIGA_OFFLINE}),account:()=>win.accounts(config.steamDir).find(a=>a.id===config.account),onUnlock:(game,a,source)=>{const f=path.join(dataDir,'activity.json'),rows=json(f,[]),row={id:crypto.randomUUID(),gameId:game.id,achievementId:a.id,title:a.title,description:a.description,icon:a.icon,account:config.account,source,at:new Date().toISOString(),native:false};rows.push(row);save(f,rows.slice(-500));
+ const achievementManager=new AchievementProviderManager({isRunning:g=>{try{return !!sessions.forGame(g.uuid,config.account)?.running;}catch{return true;}},onGameChange:()=>persist(),psnSession:()=>validPsn(config.psnAuth,{save:next=>{config.psnAuth=next;saveConfig();}}),pageFetch,log:m=>nglNote('[conquistas] '+m),xboxSession:()=>validXbox(config.xboxAuth,{save:next=>{config.xboxAuth=next;saveConfig();}}),epicSession:()=>validSession(config.epicAuth,{save:next=>{config.epicAuth=next;saveConfig();}}),config:()=>config,dir:dataDir,providers,stores:new StoreAchievements({dir:dataDir,offline:!!process.env.TAIGA_OFFLINE}),account:()=>win.accounts(config.steamDir).find(a=>a.id===config.account),onUnlock:(game,a,source)=>{const f=path.join(dataDir,'activity.json'),rows=json(f,[]),row={id:crypto.randomUUID(),gameId:game.id,achievementId:a.id,title:a.title,description:a.description,icon:a.icon,account:config.account,source,at:new Date().toISOString(),native:false};rows.push(row);save(f,rows.slice(-500));
   // Notificação nativa da Steam pelo injetor; sem Steam conectada, aviso do Windows e da página como reserva.
   const icon=String(a.icon||'').startsWith('/art/')?`http://127.0.0.1:${port}${a.icon}`:a.icon||'';
   const sid=Number(game.bindings?.[config.account])||0;
   Promise.resolve(sid&&injector?injector.evaluateShared(`window.__TAIGA_NGL_STATE__==='ready'&&!!(window.SteamUIStore&&Array.from(window.SteamUIStore.RunningApps||[]).some(a=>((Number(a.appid??a.m_unAppID))>>>0)===${sid}))`).catch(()=>false):false).then(handled=>{if(handled){const list=json(f,[]),item=list.find(x=>x.id===row.id);if(item){item.native=true;item.by='ngl';save(f,list);}return;}
   return Promise.resolve(injector?.notify({id:a.id,title:a.title,description:a.description,icon,appid:game.metadataSteamAppId||game.bindings?.[config.account]||0,globalPercent:a.globalPercent,date:a.date||row.at})).then(native=>{if(native){const list=json(f,[]),item=list.find(x=>x.id===row.id);if(item){item.native=true;save(f,list);}}else{try{onAchievementUnlocked?.(game,a,source);}catch{}}});}).catch(()=>{try{onAchievementUnlocked?.(game,a,source);}catch{}});}});
  // Jogos instalados pelas lojas (Epic, GOG, Ubisoft, itch.io, Amazon) prontos para importar.
+ const storeInfo=(info,store)=>({...info,title:store.title,internalTitle:store.title,identitySource:'Loja',store:{name:store.store,label:store.storeName,id:store.id,...(store.namespace?{namespace:store.namespace,appName:store.appName||''}:{}),url:store.url||'',...(store.titleId?{titleId:String(store.titleId)}:{}),...(store.pfn?{pfn:String(store.pfn)}:{}),needsLauncher:!!store.needsLauncher,launcherExe:store.launcherExe||null,args:store.args||'',workingDir:store.workingDir||''},suggestedRoot:store.root||info.suggestedRoot,gameRoot:store.root||null,auxiliary:false});
+ // ── Jogos das lojas que não estão instalados (Epic e Xbox) ──
+ // Opção "Mostrar jogos não instalados das lojas": cada jogo da conta entra na coleção e na Steam com o botão
+ // Instalar. Epic: instala pelo Legendary (progresso e cancelar de verdade) ou pelo Epic Games Launcher.
+ // Xbox: abre a página do jogo no app Xbox. Quando o jogo aparece instalado, a mesma entrada vira o jogo
+ // instalado (mesmo atalho da Steam, mesmas artes e tempo de jogo).
+ const legendary=new Legendary({dataDir,log:m=>nglNote('[epic] '+m)});setLegendaryExe(legendary.exe);
+ const installWatch=new Map();
+ const pfnFromUrl=u=>String(u||'').match(/AppsFolder\\([^!\\]+)!/i)?.[1]||'';
+ const itemStoreKey=it=>it.store==='epic'?(it.appName?'epic:'+String(it.appName).toLowerCase():''):it.store==='xbox'?((it.pfn||pfnFromUrl(it.url))?'xbox:'+String(it.pfn||pfnFromUrl(it.url)).toLowerCase():''):'';
+ const gameStoreKey=g=>{const s=g.store||{};if(s.name==='epic')return s.appName?'epic:'+String(s.appName).toLowerCase():'';if(s.name==='xbox'){const p=s.pfn||pfnFromUrl(s.url)||pfnFromUrl(g.launch?.args);return p?'xbox:'+p.toLowerCase():'';}return '';};
+ const epicAuthNow=()=>validSession(config.epicAuth,{save:next=>{config.epicAuth=next;saveConfig();}}).catch(()=>null);
+ const xboxAuthNow=()=>validXbox(config.xboxAuth,{save:next=>{config.xboxAuth=next;saveConfig();}}).catch(()=>null);
+ const defaultEpicDir=()=>path.join(process.env.SystemDrive?process.env.SystemDrive+'\\':os.homedir(),'Games','Epic Games');
+ const epicInstallDir=()=>config.epicInstallDir||defaultEpicDir();
+ const openLink=url=>{if(process.platform!=='win32')return;const c=spawn(explorer(),[url],{detached:true,stdio:'ignore',windowsHide:true});c.on('error',()=>{});c.unref();};
+ function placeholderGame(it){const key=itemStoreKey(it),title=String(it.title||'').slice(0,200);
+  return {id:digest('store-'+key).slice(0,20),path:path.join(dataDir,'not-installed',digest(key).slice(0,16)+'.exe'),title,fileTitle:title,internalTitle:title,identitySource:'Loja',bytes:0,mtime:0,sizeBasis:null,profile:'store',profileLocked:true,platformName:PROFILES.store.platform,platformKey:'pc',platformSource:'store',discId:'',serial:'',revision:null,region:[],languages:[],discNumber:null,needsReview:false,art:{},bindings:{},metadata:{},addedAt:new Date().toISOString(),notInstalled:true,...(it.titleEn&&it.titleEn!==title?{storeTitleEn:String(it.titleEn).slice(0,200)}:{}),
+   store:{name:it.store,label:it.storeName,id:it.id||'',...(it.store==='epic'?{namespace:it.namespace,appName:it.appName,catalogItemId:it.catalogItemId}:{pfn:it.pfn,productId:it.productId||'',titleId:it.titleId||''})},storeImages:it.images||{}};}
+ // A entrada "não instalada" vira o jogo instalado encontrado pela busca das lojas.
+ function convertInstalled(g,s){
+  delete g.notInstalled;installWatch.delete(g.id);g.path=s.path;g.gameRoot=s.root||null;g.installedAt=new Date().toISOString();
+  try{const st=fs.statSync(s.path);g.bytes=st.size;g.mtime=st.mtimeMs;}catch{}
+  g.store={...g.store,name:s.store,label:s.storeName,id:s.id||g.store?.id||'',...(s.namespace?{namespace:s.namespace,appName:s.appName||g.store?.appName||''}:{}),url:s.url||'',needsLauncher:!!s.needsLauncher,launcherExe:s.launcherExe||null};
+  if(s.needsLauncher&&s.url){g.profile='store';g.launch={exe:s.launcherExe||explorer(),args:s.url};}else{g.profile='pc';delete g.launch;}
+  nglNote('Jogo instalado: '+g.title+' ('+s.storeName+')');
+ }
+ const notInstalledGames=()=>db.games.filter(g=>g.notInstalled&&!g.demo);
+ let libraryBusy=null;
+ function syncStoreLibrary(){if(libraryBusy)return libraryBusy;libraryBusy=syncStoreLibraryNow().finally(()=>{libraryBusy=null;});return libraryBusy;}
+ // Grava logo depois de várias mudanças seguidas (capas chegando uma a uma pela tela).
+ let persistTimer=null;const persistSoon=()=>{clearTimeout(persistTimer);persistTimer=setTimeout(()=>{if(!closed)persist();},1500);persistTimer.unref?.();};
+ // Roda tarefas com no máximo N ao mesmo tempo.
+ async function pool(items,n,fn){let next=0;await Promise.all(Array.from({length:Math.min(n,items.length)},async()=>{while(next<items.length&&!closed){const it=items[next++];try{await fn(it);}catch{}}}));}
+ // Imagens oficiais guardadas da loja (capa, horizontal, fundo e logo) para o que ainda falta.
+ async function quickStoreArt(g){const im=g?.storeImages||{};let got=false;for(const [kind,url] of [['cover',im.cover],['wide',im.wide],['hero',im.wide],['logo',im.logo]]){if(!url||g.art?.[kind]||g.artPinned?.[kind])continue;try{g.art={...(g.art||{}),[kind]:await providers.image(url)};got=true;}catch{}}return got;}
+ async function syncStoreLibraryNow(){
+  const out={added:0,removed:0,installed:0,errors:[],stores:[]};
+  let scanned=[];try{scanned=(await scanStores()).items||[];}catch{}
+  const byKey=new Map();for(const s of scanned){const k=itemStoreKey(s);if(k&&!byKey.has(k))byKey.set(k,s);}
+  // Instalados por fora (Epic, app Xbox, Legendary): a entrada vira o jogo instalado.
+  for(const g of notInstalledGames()){const s=byKey.get(gameStoreKey(g));if(s&&!db.games.some(o=>o!==g&&!o.notInstalled&&o.path.toLowerCase()===s.path.toLowerCase())){convertInstalled(g,s);out.installed++;}}
+  if(!config.preferences.showUninstalled){
+   const list=notInstalledGames().filter(g=>!g.hidden&&!legendary.state(g.store?.appName||'')?.phase?.match(/^(tool|preparing|downloading|finishing)$/));
+   if(list.length){const bound=list.filter(g=>g.bindings?.[config.account]).map(g=>g.id);if(bound.length)try{await sync(bound,{remove:true,restart:false,openSteam:false});}catch(e){out.errors.push({file:'Steam',message:e.message});persist();return out;}
+    const drop=new Set(list.map(g=>g.id));db.games=db.games.filter(g=>!drop.has(g.id));out.removed=list.length;}
+   if(out.installed||out.removed)persist();return out;
+  }
+  const lang=config.language||sysLang,lib=[],fetched=new Set();
+  if(config.epicAuth){const auth=await epicAuthNow();if(auth)try{lib.push(...await epicLibrary(auth,{cacheDir:path.join(dataDir,'cache'),language:lang}));fetched.add('epic');out.stores.push('Epic Games');}catch(e){out.errors.push({file:'Epic Games',message:e.message});}}
+  if(config.xboxAuth){const s=await xboxAuthNow();if(s)try{lib.push(...await xboxLibrary(s,{language:lang}));fetched.add('xbox');out.stores.push('Xbox');}catch(e){out.errors.push({file:'Xbox',message:e.message});}}
+  const known=new Set([...db.games.map(gameStoreKey).filter(Boolean),...byKey.keys()]);
+  const added=[],libKeys=new Set();
+  for(const it of lib){const k=itemStoreKey(it);if(!k)continue;libKeys.add(k);if(known.has(k))continue;known.add(k);const g=placeholderGame(it);if(db.games.some(o=>o.id===g.id))continue;db.games.push(g);added.push(g.id);}
+  // Jogo que saiu da conta (devolvido, fim do Game Pass): a entrada não instalada sai também.
+  const gone=notInstalledGames().filter(g=>fetched.has(g.store?.name)&&!libKeys.has(gameStoreKey(g))&&!installWatch.has(g.id)&&!legendary.state(g.store?.appName||''));
+  if(gone.length){const bound=gone.filter(g=>g.bindings?.[config.account]).map(g=>g.id);let ok=true;if(bound.length)try{await sync(bound,{remove:true,restart:false,openSteam:false});}catch{ok=false;}if(ok){const drop=new Set(gone.map(g=>g.id));db.games=db.games.filter(g=>!drop.has(g.id));out.removed=gone.length;}}
+  out.added=added.length;persist();
+  // Jogos já cadastrados que ainda não acharam o jogo na Steam: ganham o nome em inglês e tentam de novo.
+  const retry=[];for(const it of lib){const g=notInstalledGames().find(x=>gameStoreKey(x)===itemStoreKey(it));if(!g)continue;if(it.titleEn&&it.titleEn!==g.title&&!g.storeTitleEn)g.storeTitleEn=String(it.titleEn).slice(0,200);if(it.images&&!g.storeImages?.cover)g.storeImages=it.images;if(!steamAppIdFor(g)&&!g.steamLinkDisabled&&!g.storeLinkRetry254){g.storeLinkRetry254=true;delete g.storeSteamCheckedAt;delete g.steamNameCheckedAt;delete g.steamResolve;retry.push(g.id);}}
+  const linkAndArt=async id=>{const g=db.games.find(x=>x.id===id);if(!g||closed)return;try{await autoSteamLink(g);}catch{}};
+  const todo=[...added,...retry];
+  // Capas na hora: as imagens oficiais da própria loja (Epic, Xbox, GOG) vêm direto do site da loja, sem consultas.
+  // Depois, quem existe na Steam troca pelas artes oficiais da Steam.
+  await pool(todo.map(id=>db.games.find(x=>x.id===id)).filter(Boolean),8,quickStoreArt);if(todo.length){persist();injector?.reload?.()?.catch?.(()=>{});}
+  await pool(todo,6,linkAndArt);if(todo.length)persist();
+  if(added.length){(async()=>{for(const id of added){if(closed)return;const g=db.games.find(x=>x.id===id);if(!g)continue;try{await providers.completeMissing?.(g);}catch{}}persist();injector?.reload().catch(()=>{});})().catch(()=>{});
+   try{await autoAddToSteam(added);}catch(e){out.errors.push({file:'Steam',message:e.message});}}
+  if(retry.length)refreshSteamLive?.().catch?.(()=>{});
+  nglNote('Biblioteca das lojas: '+out.added+' novo(s), '+out.installed+' instalado(s), '+out.removed+' removido(s).');
+  setTimeout(()=>prefetchSizes(),15000).unref?.();
+  return out;
+ }
+ // Estado da instalação de um jogo (página da Steam e janela do jogo).
+ function installState(g){
+  if(!g)return {state:'unknown'};if(!g.notInstalled)return {state:'installed'};
+  const store=g.store?.name||'';
+  if(store==='epic'){const j=legendary.state(g.store.appName);if(j&&!['done','cancelled'].includes(j.phase)&&!(j.phase==='error'&&installWatch.has(g.id))){if(j.phase==='error'&&!installWatch.has(g.id))return {state:'error',store,error:j.error||'',errorCode:j.errorCode||'',errorValues:j.errorValues||{}};if(j.phase==='paused')return {state:'paused',store,phase:'paused',percent:Math.round((j.percent||0)*10)/10,downloadedMiB:j.downloadedMiB||0,totalMiB:j.totalMiB||0};return {state:'installing',store,phase:j.phase,percent:Math.round((j.percent||0)*10)/10,eta:j.eta||'',downloadedMiB:j.downloadedMiB||0,totalMiB:j.totalMiB||0,speedMiB:j.speedMiB||0};}}
+  if(installWatch.has(g.id))return {state:'external',store};
+  return {state:'none',store,method:store==='epic'?(config.preferences.epicInstaller==='launcher'?'launcher':'legendary'):'app',sizeBytes:g.store?.diskBytes||0};
+ }
+ let installTimer=null;
+ function watchExternalInstalls(){if(installTimer)return;installTimer=setInterval(async()=>{if(closed||!installWatch.size){clearInterval(installTimer);installTimer=null;return;}for(const [id,w] of installWatch)if(Date.now()-w.since>6*3600000)installWatch.delete(id);try{await refreshInstalledStores();}catch{}},20000);}
+ async function refreshInstalledStores(){let scanned=[];try{scanned=(await scanStores()).items||[];}catch{return 0;}const byKey=new Map(scanned.map(s=>[itemStoreKey(s),s]));let n=0;
+  for(const g of notInstalledGames()){const s=byKey.get(gameStoreKey(g));if(s&&!db.games.some(o=>o!==g&&!o.notInstalled&&o.path.toLowerCase()===s.path.toLowerCase())){convertInstalled(g,s);n++;}}
+  if(n){persist();injector?.reload().catch(()=>{});refreshSteamLive?.().catch?.(()=>{});}return n;}
+ // ── Janela "Instalar" (igual à da Steam): tamanho do jogo, discos e atalhos ──
+ let driveLabels={at:0,map:{}};
+ async function volumeLabels(){if(process.platform!=='win32')return {};if(Date.now()-driveLabels.at<600000)return driveLabels.map;
+  try{const {stdout}=await new Promise((ok,no)=>execFile('powershell.exe',['-NoProfile','-Command','[Console]::OutputEncoding=New-Object System.Text.UTF8Encoding($false);Get-CimInstance Win32_LogicalDisk | Select-Object DeviceID,VolumeName,DriveType | ConvertTo-Json -Compress'],{windowsHide:true,timeout:15000},(e,so)=>e?no(e):ok({stdout:String(so)})));
+   const rows=[].concat(JSON.parse(stdout.trim()||'[]')),map={};for(const r of rows)if(r?.DeviceID)map[String(r.DeviceID).toUpperCase()]={label:String(r.VolumeName||''),type:Number(r.DriveType)};driveLabels={at:Date.now(),map};}catch{}
+  return driveLabels.map;}
+ async function installDrives(needBytes){
+  const labels=await volumeLabels(),cfgDir=epicInstallDir(),defLetter=(path.parse(cfgDir).root||'C:\\').slice(0,2).toUpperCase(),out=[];
+  for(let c=67;c<=90;c++){const letter=String.fromCharCode(c)+':',root=letter+'\\';if(process.platform==='win32'&&!fs.existsSync(root))continue;const info=labels[letter];if(info&&![2,3].includes(info.type))continue;
+   let free=0,total=0;try{const st=fs.statfsSync(root);free=Number(st.bavail)*Number(st.bsize);total=Number(st.blocks)*Number(st.bsize);}catch{continue;}
+   const dir=letter===defLetter?cfgDir:path.join(root,'Games','Epic Games');out.push({letter,label:info?.label||'',free,total,dir,default:letter===defLetter,enough:!needBytes||free>needBytes});}
+  if(process.platform!=='win32'&&!out.length){try{const st=fs.statfsSync(cfgDir.startsWith('/')?'/':os.homedir());out.push({letter:'/',label:'',free:Number(st.bavail)*Number(st.bsize),total:0,dir:cfgDir,default:true,enough:true});}catch{}}
+  return out;}
+ const sizeJobs=new Map();
+ // Tamanho do jogo (Epic): guardado no cadastro; a primeira consulta roda em segundo plano.
+ function epicSize(g){if(g.store?.diskBytes)return Promise.resolve(g.store.diskBytes);if(sizeJobs.has(g.id))return sizeJobs.get(g.id);
+  const job=(async()=>{const auth=await epicAuthNow();if(!auth)return 0;const r=await legendary.info(g.store.appName,auth);if(r.diskBytes){g.store.diskBytes=r.diskBytes;g.store.downloadBytes=r.downloadBytes;persist();}return r.diskBytes;})().catch(e=>{nglNote('Tamanho do jogo ('+g.title+'): '+e.message);return 0;}).finally(()=>sizeJobs.delete(g.id));
+  sizeJobs.set(g.id,job);return job;}
+ // Tamanhos calculados antes, em segundo plano e devagar (um jogo por vez, com pausa), para a página já abrir com o
+ // "Espaço necessário". Para enquanto houver jogo aberto, para não pesar.
+ let sizePrefetch=null;
+ function prefetchSizes(){if(sizePrefetch||closed||process.platform!=='win32'||!config.preferences.showUninstalled||!config.epicAuth)return;sizePrefetch=(async()=>{
+  const todo=notInstalledGames().filter(g=>g.store?.name==='epic'&&!g.store.diskBytes&&!g.hidden&&!(g.store.sizeTriedAt&&Date.now()-g.store.sizeTriedAt<86400000));
+  for(const g of todo){if(closed||!config.preferences.showUninstalled)break;if(db.games.some(x=>x.uuid&&sessions.forGame(x.uuid,config.account)?.running))break;if(legendary.active().length)break;
+   g.store.sizeTriedAt=Date.now();try{await epicSize(g);}catch{}await new Promise(r=>setTimeout(r,2500));}
+  persist();})().finally(()=>{sizePrefetch=null;});}
+ async function installInfo(g,{wait=false}={}){
+  if(!g?.notInstalled)return {state:'installed'};const st=installState(g);
+  let size=g.store?.diskBytes||0;if(!size&&g.store?.name==='epic'&&process.platform==='win32'){const p=epicSize(g);if(wait)size=await Promise.race([p,new Promise(r=>setTimeout(()=>r(0),45000))]);}
+  let header='';const art=g.art?.wide||g.art?.hero||g.art?.cover;if(art)try{const f=path.join(dataDir,'art',path.basename(art)),b=fs.readFileSync(f);if(b.length<4000000)header='data:image/'+(imageType(b)==='png'?'png':'jpeg')+';base64,'+b.toString('base64');}catch{}
+  return {...st,title:g.title,sizeBytes:size,header,drives:g.store?.name==='epic'?await installDrives(size):[]};}
+ // Atalhos como os da Steam: abrem o jogo pela Steam (steam://rungameid), com o ícone do jogo.
+ let desktopDir=null;
+ async function shellFolder(name){if(process.platform!=='win32')return '';try{const {stdout}=await new Promise((ok,no)=>execFile('powershell.exe',['-NoProfile','-Command','[Environment]::GetFolderPath("'+name+'")'],{windowsHide:true,timeout:10000},(e,so)=>e?no(e):ok({stdout:String(so)})));return stdout.trim();}catch{return '';}}
+ async function createGameShortcuts(g,{desktop=false,startMenu=false}={}){
+  const id=Number(g.bindings?.[config.account])>>>0;if(!id||(!desktop&&!startMenu))return;
+  const url='steam://rungameid/'+((BigInt(id)<<32n)|0x02000000n).toString(),icon=isFile(g.path)?g.path:'';
+  const body='[InternetShortcut]\r\nIDList=\r\nURL='+url+'\r\n'+(icon?'IconIndex=0\r\nIconFile='+icon+'\r\n':''),name=String(g.title).replace(/[<>:"/\\|?*\x00-\x1f]/g,'').trim().slice(0,120)||'Jogo';
+  if(desktop){desktopDir??=await shellFolder('Desktop');if(desktopDir)try{fs.writeFileSync(path.join(desktopDir,name+'.url'),body);}catch{}}
+  if(startMenu){const dir=await shellFolder('Programs');if(dir)try{fs.writeFileSync(path.join(dir,name+'.url'),body);}catch{}}}
+ async function startInstall(g,{via='',dir='',shortcuts=null}={}){
+  if(!g?.notInstalled)return installState(g);
+  const store=g.store?.name;
+  if(store==='xbox'){openLink(xboxStoreLink(g.store));installWatch.set(g.id,{since:Date.now()});watchExternalInstalls();return installState(g);}
+  if(store!=='epic')throw Error('Instalação não disponível para esta loja.');
+  if((config.preferences.epicInstaller==='launcher'&&via!=='legendary')||via==='launcher'){openLink(epicInstallLink(g.store));installWatch.set(g.id,{since:Date.now()});watchExternalInstalls();return installState(g);}
+  const auth=await epicAuthNow();if(!auth)throw Error('Entre com a sua conta Epic em Contas para instalar jogos da Epic.');
+  let baseDir=epicInstallDir();const want=String(dir||'').trim();if(want){if(!path.isAbsolute(want)||/[<>"|?*]/.test(want.slice(2)))throw Error('Escolha uma pasta válida para instalar os jogos da Epic.');baseDir=want;}
+  if(shortcuts&&typeof shortcuts==='object')g.installShortcuts={desktop:!!shortcuts.desktop,startMenu:!!shortcuts.startMenu};
+  await legendary.install(g.store.appName,{auth,baseDir,onDone:async st=>{
+   if(st.phase==='done'){const n=await refreshInstalledStores().catch(()=>0);if(n&&g.installShortcuts){try{await createGameShortcuts(g,g.installShortcuts);}catch{}delete g.installShortcuts;persist();}if(!n)nglNote('Instalação Epic terminou, mas o jogo não foi encontrado: '+g.title);}
+   // Jogo que só instala pelo Ubisoft Connect: a própria Epic cuida da instalação.
+   else if(st.phase==='error'&&st.errorCode==='uplay'){openLink(epicInstallLink(g.store));installWatch.set(g.id,{since:Date.now()});watchExternalInstalls();}
+  }});
+  return installState(g);
+ }
+ async function pauseInstall(g){if(g?.store?.name==='epic')await legendary.pause(g.store.appName);return installState(g);}
+ async function cancelInstall(g){if(!g)return {state:'unknown'};if(g.store?.name==='epic'&&legendary.state(g.store.appName))await legendary.cancel(g.store.appName);installWatch.delete(g.id);return installState(g);}
+ // Arquivos escolhidos à mão: atalhos (.lnk/.url) viram o jogo de destino. Atalho do Xbox (shell:AppsFolder, sem
+ // arquivo de destino) é ligado ao jogo do Xbox pela família do pacote ou pelo nome do atalho.
+ async function resolvePicked(paths){let stores=null;const getStores=async()=>stores??=(await scanStores().catch(()=>({items:[]}))).items||[];const norm=t=>String(t||'').toLowerCase().replace(/[^a-z0-9]+/g,'');const out=[];
+  for(const file of paths){if(!/\.(lnk|url)$/i.test(file)){out.push(file);continue;}
+   let target='';if(/\.lnk$/i.test(file)){try{target=readShortcut?String(readShortcut(file)||''):'';}catch{}if(!target)try{target=lnkTarget(file);}catch{}}
+   if(target&&isFile(target)&&!/\.(lnk|url)$/i.test(target)){out.push(target);continue;}
+   let raw='';try{const b=fs.readFileSync(file);raw=(b.toString('utf16le')+'\n'+b.toString('latin1')).toLowerCase();}catch{}
+   const list=await getStores(),name=norm(path.basename(file).replace(/\.(lnk|url)$/i,''));
+   const hit=list.find(i=>{const fam=String(i.url||'').match(/appsfolder\\([^!]+)!/i)?.[1];return fam&&raw.includes(fam.toLowerCase());})||list.find(i=>i.url&&raw.includes(String(i.url).toLowerCase()))||list.find(i=>name&&norm(i.title)===name);
+   out.push(hit?hit.path:file);}
+  return {paths:out,stores:await getStores()};}
  async function storePreview(){
   const found=await scanStores(),errors=[...found.errors];const fresh=found.items.filter(item=>!db.games.some(g=>!g.demo&&windowsPath(g.path)===windowsPath(item.path)));
   const existing=found.items.map(item=>db.games.find(g=>!g.demo&&windowsPath(g.path)===windowsPath(item.path))).filter(Boolean).map(g=>({id:g.id,title:g.title,path:g.path,hidden:!!g.hidden}));
   const inspected=fresh.length?await inventory('inspect',fresh.slice(0,500).map(i=>i.path)):{items:[],errors:[]};errors.push(...inspected.errors);
-  const items=inspected.items.map(info=>{const store=fresh.find(i=>windowsPath(i.path)===windowsPath(info.path));delete info.icon;return {...info,title:store.title,internalTitle:store.title,identitySource:'Loja',store:{name:store.store,label:store.storeName,id:store.id,...(store.namespace?{namespace:store.namespace,appName:store.appName||''}:{}),url:store.url||'',needsLauncher:!!store.needsLauncher,launcherExe:store.launcherExe||null,args:store.args||'',workingDir:store.workingDir||''},suggestedRoot:store.root||info.suggestedRoot,gameRoot:store.root||null,auxiliary:false};});
+  const items=inspected.items.map(info=>{const store=fresh.find(i=>windowsPath(i.path)===windowsPath(info.path));delete info.icon;return storeInfo(info,store);});
   return {items:splitDuplicates(items,existing),existing,errors,stores:[...new Set(found.items.map(i=>i.storeName))]};
  }
  // Jogos adicionados antes das chaves de API: ao salvar as chaves, completa capas, fundos, logos e dados que faltam.
@@ -121,21 +285,42 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
   try{fs.mkdirSync(path.dirname(nglLogFile),{recursive:true});try{if(fs.statSync(nglLogFile).size>1048576)fs.renameSync(nglLogFile,nglLogFile+'.1');}catch{}fs.appendFileSync(nglLogFile,line+'\n');}catch{}};
  const artUrl=name=>name&&/^[a-f0-9]+\.(png|jpg|ico)$/.test(String(name))?`http://127.0.0.1:${port}/art/${name}`:'';
  const shortcutGame=id=>{const n=Number(id)>>>0;return n?db.games.find(g=>!g.demo&&!g.hidden&&(Number(g.bindings?.[config.account])>>>0)===n)||null:null;};
- const virtualIndex=()=>{const m=new Map();for(const g of db.games)if(!g.demo&&g.uuid)m.set(virtualAppIdFor(g.uuid),g);return m;};
- const nglBackend=createNglBackend({translate:text=>translateText(text,dataDir,u=>providers.request(u),config.language||sysLang,'en'),dataDir,config:()=>config,games:()=>db.games.filter(g=>!g.demo&&!g.hidden),shortcutGame,virtualGame:vid=>{const g=virtualIndex().get(Number(vid));return g?{...g,emulatorName:g.profile==='pc'||g.profile==='store'?'':PROFILES[g.profile||'psp']?.name||''}:null;},
+ // Cartas colecionáveis dos jogos sem página na Steam (jogos de emulador e outros): personagens do IGDB ou, sem eles,
+ // conquistas do jogo. Guardadas no jogo; refeitas depois de 30 dias (ou 1 dia, se não achou nada).
+ const cardCache=new Map(),cardJobs=new Map();
+ // Depois de montadas, as cartas ficam salvas no jogo e não mudam mais (nada é refeito a cada abertura da página). Só
+ // um conjunto vazio tenta de novo (uma vez por dia), e um conjunto feito só com imagens locais tenta achar personagens
+ // ou conquistas uma vez por semana.
+ function ensureCards(g){const set=g.cardSet,age=set?Date.now()-set.at:Infinity;if(set&&set.v===2&&(set.items?.length?(set.source!=='scenes'||age<7*86400000):age<86400000))return Promise.resolve(set);if(cardJobs.has(g.id))return cardJobs.get(g.id);
+  const media=()=>[...(g.media||[]).map(m=>({file:path.basename(String(m.image||'')),name:g.title})),...['hero','wide','cover'].map(k=>g.art?.[k]?{file:path.basename(g.art[k]),name:g.title}:null).filter(Boolean)];
+  const job=cardSet(g,{igAvailable:()=>providers.igAvailable?.(),ig:(q,e)=>providers.ig(q,e),image:url=>providers.image(url),achievements:async()=>(achievementManager.cached(g)||await achievementManager.get(g,{quiet:true}).catch(()=>null))?.achievements||[],media,platformIgdb:Number(platformOf(g)?.igdb)||0,artDir:path.join(dataDir,'art'),log:m=>nglNote(m)})
+   .then(r=>{if(set?.items?.length&&!r.items.length)return set;g.cardSet={...r,v:2};if(r.items.length)nglNote('Cartas de '+g.title+': '+r.items.length+' ('+r.source+').');persist();return g.cardSet;}).catch(()=>set||null).finally(()=>cardJobs.delete(g.id));cardJobs.set(g.id,job);return job;}
+ async function virtualCards(vid){const g=virtualIndex().get(Number(vid));if(!g)return null;const set=await Promise.race([ensureCards(g),new Promise(r=>setTimeout(()=>r(g.cardSet||null),25000))]);if(!set?.items?.length)return {appid:Number(vid),cards:[],badges:[],generated:true};
+  const v=set.at.toString(36),badge=artUrl(g.art?.logo||g.art?.icon||g.art?.cover);
+  return {appid:Number(vid),generated:true,source:set.source,game:g.title,cards:set.items.map((it,i)=>({title:it.name,image:`http://127.0.0.1:${port}/card/${g.id}/${i}.svg?v=${v}`,artwork:artUrl(it.file)||''})),badges:badge?[{title:g.title,image:badge}]:[]};}
+ // Índice AppID virtual → jogo, refeito só quando a coleção muda (antes era recalculado a cada pedido da página da Steam).
+ let vIndex=null,vIndexAt=-1,vIndexLen=-1;
+ const virtualIndex=()=>{if(vIndex&&vIndexAt===dataVersion&&vIndexLen===db.games.length)return vIndex;const m=new Map();for(const g of db.games)if(!g.demo&&g.uuid)m.set(virtualAppIdFor(g.uuid),g);vIndex=m;vIndexAt=dataVersion;vIndexLen=db.games.length;return m;};
+ const nglBackend=createNglBackend({dataVersion:()=>{try{return dataVersion;}catch{return 0;}},translate:text=>translateText(text,dataDir,u=>providers.request(u),config.language||sysLang,'en'),dataDir,config:()=>config,games:()=>db.games.filter(g=>!g.demo&&!g.hidden),shortcutGame,virtualGame:vid=>{const g=virtualIndex().get(Number(vid));return g?{...g,emulatorName:g.profile==='pc'||g.profile==='store'?'':PROFILES[g.profile||'psp']?.name||''}:null;},
   localizeGame:async vid=>{const g=virtualIndex().get(Number(vid));if(!g)return;const before=g.metadata?.summary;await providers.localize(g).catch(()=>{});if(g.metadata?.summary!==before)persist();},
   steamAppIdOf:g=>steamAppIdFor(g),linkGame:(g,appId)=>{delete g.steamLinkDisabled;g.steamLink={appId,name:g.steamLink?.appId===appId?g.steamLink.name:'',source:'nativegamelink',at:new Date().toISOString()};g.metadataSteamAppId=appId;g.nglDismissed=false;persist();},
   unlinkGame:g=>{if(steamAppIdFor(g)&&g.steamLink?.source==='nativegamelink'){g.steamLinkPrev={...g.steamLink,removedAt:new Date().toISOString()};delete g.steamLink;g.steamLinkDisabled=true;}else g.nglDismissed=true;persist();},save:()=>persist(),
   achievements:(g,o)=>achievementManager.get(g,o),cachedAchievements:g=>achievementManager.cached(g)||providers.cachedAchievements(g),playtime:g=>sessions.forGame(g.uuid,config.account),artUrl,
   searchStore:term=>steamLink.search(term),executableTitle:f=>{try{return executableTitle(f);}catch{return '';}},steamAppIdEvidence,log:nglNote,
   setConfig:patch=>{Object.assign(config,patch);saveConfig();},setGameAchievementRoot:(g,root)=>{g.achievementSettings={...(g.achievementSettings||{}),root:root||undefined};persist();},
-  onSteamGridDbKey:key=>{if(!config.sgdbKey){config.sgdbKey=key;saveConfig();}},adoptShortcut:info=>adoptShortcut(info)});
+  onSteamGridDbKey:key=>{if(!config.sgdbKey){config.sgdbKey=key;saveConfig();}},adoptShortcut:info=>adoptShortcut(info),virtualCards:vid=>virtualCards(vid),install:{ids:()=>db.games.filter(g=>g.notInstalled&&!g.hidden&&!g.demo&&g.bindings?.[config.account]).map(g=>({id:Number(g.bindings[config.account])>>>0,...installState(g)})),state:g=>installState(g),start:(g,o)=>startInstall(g,o),pause:g=>pauseInstall(g),info:(g,o)=>installInfo(g,o),pickFolder:async()=>{try{const r=await picker('folder');return Array.isArray(r)&&r[0]?String(r[0]):'';}catch{return '';}},cancel:g=>cancelInstall(g)}});
  // Jogo de emulador adicionado pela própria Steam ("Adicionar um jogo não Steam"): quando o atalho abre um emulador
  // conhecido com um arquivo de jogo que o conteúdo identifica, entra na coleção já ligado a esse atalho.
  const emulatorExeNames=new Map(Object.entries(REGISTRY_PROFILES).flatMap(([key,p])=>(p.files||[]).map(f=>[f.toLowerCase(),key])));
  const adopting=new Set();
  async function adoptShortcut({sid,exe,startDir,options,title}={}){
   sid=Number(sid)>>>0;if(!sid||sid<2147483648||shortcutGame(sid)||adopting.has(sid))return null;
+  // Atalho do próprio Taiga Launcher (abre "--taiga-launch <uuid>") que perdeu a ligação com o jogo (Steam recriou o
+  // atalho com outro número, cadastro antigo): religa na hora e a página do jogo volta (loja, instalar, conquistas).
+  const own=String(options||'').match(/--taiga-launch\s+"?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"?/i);
+  if(own){const g=db.games.find(x=>!x.demo&&String(x.uuid||'').toLowerCase()===own[1].toLowerCase());
+   if(!g){nglNote('Atalho da Steam de um jogo que não está mais no Taiga Launcher: '+String(title||sid).slice(0,120)+'.');return null;}
+   g.bindings={...(g.bindings||{}),[config.account]:sid};g.hidden=false;if(g.steamRemoved)delete g.steamRemoved[config.account];persist();nglNote('Atalho da Steam religado ao jogo: '+g.title+'.');return g;}
   const profile=emulatorExeNames.get(path.win32.basename(String(exe||'').replace(/^"|"$/g,'')).toLowerCase());if(!profile)return null;
   const tokens=[...String(options||'').matchAll(/"([^"]+)"|(\S+)/g)].map(m=>m[1]||m[2]),file=tokens.map(t=>path.isAbsolute(t)||/^[a-z]:[\\/]/i.test(t)?t:startDir?path.join(String(startDir).replace(/^"|"$/g,''),t):'').find(t=>t&&isFile(t)&&!/\.exe$/i.test(t));
   if(!file||db.games.some(g=>!g.demo&&windowsPath(g.path)===windowsPath(file)))return null;
@@ -159,6 +344,40 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
  const community=new SteamCommunity({request:(u,o)=>providers.request(u,o),requestText:(u,o)=>providers.requestText(u,o),language:()=>config.language||sysLang});
  // AppID da Steam vinculado: associação manual, ficha, detecção (steam_appid etc.) ou jogo nativo.
  // Páginas do perfil na Comunidade Steam (Jogos, Recém-jogados, Concluídos, Conquistas) com os jogos do Taiga Launcher.
+ // Comentários online dos jogos sem página na Steam (servidor do Taiga Launcher; login pela Steam).
+ const comments=createComments({server:()=>providers.server(),config:()=>config,saveConfig,log:m=>nglNote(m)});
+ // Ports e recompilações: o jogo original (nome e console do perfil do port ou do PARAM.SFO do dump), seja qual for a
+ // versão ou o nome do .exe. Assim todos com o mesmo jogo (port ou emulador) veem os mesmos comentários.
+ function originalIdentity(g){let prof=null,port=null;if(['pc','custom'].includes(g.profile)&&/\.exe$/i.test(g.path||'')){try{prof=portProfile(g);}catch{}try{port=portOf(g);}catch{}}return {title:prof?.title||port?.title||'',platform:prof?.platform||port?.platform||platformOf(g)?.key||''};}
+ // Parte de baixo da página dos jogos sem página na Steam: sua atividade, trailers, capturas e jogos parecidos.
+ const gameExtras=createGameExtras({cacheDir:path.join(dataDir,'cache'),ig:q=>providers.ig(q),igAvailable:()=>{try{return !!providers.igAvailable?.();}catch{return false;}},image:url=>providers.image(url),log:m=>nglNote(m)});
+ async function extrasCall(args){
+  const g=args&&args.shortcut_app_id?shortcutGame(args.shortcut_app_id):null;if(!g||g.native||g.demo||steamAppIdFor(g))return {enabled:false};
+  const ach=achievementManager.cached(g),iconUrl=u=>{const v=String(u||'');if(v.startsWith('/art/'))return artUrl(v.slice(5));return /^https:\/\//.test(v)?v:'';};
+  const activity=buildGameActivity({achievements:ach?.achievements||[],iconUrl});
+  const id=originalIdentity(g),opts={title:id.title||g.title,platformIgdb:Number(platformOf(g)?.igdb)||0,onResolved:()=>persist()};
+  const media=args.wait?await gameExtras.wait(g,opts):gameExtras.get(g,opts);
+  const owned=new Map();for(const o of db.games){if(o.demo||o.hidden)continue;const sid=Number(o.bindings?.[config.account])>>>0;if(sid)owned.set(commentTitle(o.title),sid);}
+  const similar=(media.similar||[]).map(s=>({name:s.name,cover:artUrl(s.cover),year:s.year||null,family:!!s.family,shortcut:owned.get(commentTitle(s.name))||null})).filter(s=>s.cover);
+  return {enabled:true,activity,videos:(media.videos||[]).map(v=>({id:v.id,name:v.name,thumb:artUrl(v.thumb)||''})),shots:(media.shots||[]).map(artUrl).filter(Boolean),similar,pending:!!media.pending};
+ }
+ async function commentsCall(method,args){
+  const g=args&&args.shortcut_app_id?shortcutGame(args.shortcut_app_id):null,target=g&&!g.native&&!g.demo&&!steamAppIdFor(g)?g:null;
+  const key=target?gameCommentKey(target,originalIdentity(target)):'';
+  try{
+   if(method==='taiga_comments_state'){const st=comments.state();if(!key||!st.available)return {enabled:false};if(st.loggedIn&&Date.now()-Date.parse(config.commentsAuth?.at||0)>6*3600000){config.commentsAuth.at=new Date().toISOString();comments.refreshMe().catch(()=>{});}let page;try{page=await comments.list(key,{sort:args.sort==='popular'?'popular':'recent',offset:Math.max(0,Number(args.offset)||0),lang:commentLang(config.language||sysLang),all:args.all===true});}catch(e){page={items:[],error:e.code||'offline'};}return {enabled:true,game:String(target.title||'').slice(0,120),lang:commentLang(config.language||sysLang),...comments.state(),...page};}
+   if(method==='taiga_comments_post'){if(!key)return {ok:false,error:'game'};return {ok:true,...await comments.post(key,String(args.text||'').slice(0,4000),commentLang(config.language||sysLang))};}
+   if(method==='taiga_comments_delete')return await comments.remove(String(args.id||''));
+   if(method==='taiga_comments_report')return await comments.report(String(args.id||''));
+   if(method==='taiga_comments_like')return await comments.like(String(args.id||''),args.like!==false);
+   if(method==='taiga_comments_login')return {ok:true,...await comments.startLogin()};
+   if(method==='taiga_comments_login_state')return comments.state();
+   if(method==='taiga_comments_logout')return await comments.logout();
+   // Traduz um comentário que a página mostrou (pelo número; o texto vem do que o servidor mandou).
+   if(method==='taiga_comments_translate'){const c=comments.seenComment(String(args.id||''));if(!c)return {ok:false,error:'not_found'};const target=config.language||sysLang;const lang=['pt-BR','en','es','fr','de'].includes(target)?target:'en';try{const text=await translateText(c.body,dataDir,u=>providers.request(u),lang,c.lang||'auto');return {ok:true,text:String(text||'').slice(0,2000)};}catch{return {ok:false,error:'translate'};}}
+  }catch(e){if(!e?.code)nglNote('Comentários ('+method+'): '+String(e?.message||e).slice(0,200));return {ok:false,error:e?.code||'offline',minLevel:e?.minLevel||null,wait:e?.wait||null,detail:e?.detail||''};}
+  throw Error('Não permitido.');
+ }
  const profilePages=createCommunity({artOrigin:name=>{try{return providers.artOrigin?.(name)||'';}catch{return '';}},language:()=>config.language||sysLang,games:()=>db.games,account:()=>config.account,steamId:()=>{try{return config.steamDir?win.accounts(config.steamDir).find(a=>a.id===config.account)?.steamId||'':'';}catch{return '';}},steamAppIdOf:g=>steamAppIdFor(g),virtualAppIdOf:uuid=>nglBackend.virtualAppIdFor(uuid),playtimeOf:(g,sid)=>nglBackend.playtimeFor({shortcut_app_id:String(sid)}),achievementsOf:g=>achievementManager.get(g),cachedAchievementsOf:g=>achievementManager.cached(g),artDir:path.join(dataDir,'art'),port,imageThumb,log:nglNote});
  // Perfil para amigos (opcional, sem servidor por padrão): arquivo pequeno com os jogos do Taiga Launcher.
  const publicProfile=createPublicProfile({dir:dataDir,config:()=>config,build:()=>profilePages.publicProfile(),log:nglNote});
@@ -194,7 +413,10 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
   if(!appId&&g.steamLinkCandidates?.length&&root&&!(g.steamVerifyAt&&Date.now()-g.steamVerifyAt<86400000)){g.steamVerifyAt=Date.now();try{const v=await verifyCandidates(g.steamLinkCandidates.filter(c=>c.score>=.5),{exes:folderExecutables(root,g.path),folder:path.basename(root),request:u=>providers.request(u)});if(v)appId=found(v.appId,'steam-'+v.by+':'+v.detail,v.name);}catch{}persist();}
   // 5. Nome exato e único.
   if(!appId&&Array.isArray(g.steamLinkCandidates)&&g.steamLinkCandidates.length){const key=t=>normalizeTitle(String(t||'').replace(/[™®©]/g,''));const exact=g.steamLinkCandidates.filter(c=>c.score>=.99&&[g.title,g.wikiEnTitle,g.engineProduct].some(t=>t&&key(t)===key(c.title)));const close=g.steamLinkCandidates.filter(c=>c.score>=.9);if(exact.length===1&&close.length===1)appId=found(exact[0].appId,'name-exact',exact[0].title);}
-  if(appId)queue.add('steam-link-refresh',{uuid:g.uuid,gameId:g.id,appId,account:config.account},'steam-link:'+g.uuid+':'+appId+':'+(config.language||sysLang));};
+  // Ligado à Steam: nome, descrição e artes oficiais (capa, fundo, logo, ícone) entram na hora, antes de o jogo ir
+  // para a Steam; se a Steam não responder agora, fica na fila e tenta de novo.
+  if(appId){let done=false;if(!g.steamLink&&!closed)try{await steamLink.apply(g,appId);persist();done=!!g.steamLink;achievementManager.get(g).catch(()=>{});}catch{}
+   if(!done)queue.add('steam-link-refresh',{uuid:g.uuid,gameId:g.id,appId,account:config.account},'steam-link:'+g.uuid+':'+appId+':'+(config.language||sysLang));}};
  // Port + pasta do console: a versão de emulador entra no port (escondida, com o motivo) em vez de ficar duplicada.
  // Jogo sem ícone próprio: a Steam mostraria o ícone do .exe do Taiga Launcher (e guardava o antigo). Usa o ícone do
  // programa de forma explícita, gravado na pasta de artes da Steam, para ficar sempre o atual.
@@ -216,6 +438,19 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
  const PORT_AUX=/^(unins|setup|install|crash|report|vc_?redist|dxsetup|dotnet|ue4prereq|easyanticheat|update|patch|config)/i;
  // Port com tela de configurações antes do jogo: usa o argumento do iniciador "Play ..." para abrir direto no jogo.
  function applyDirectPlay(g){if(g.demo||g.profile!=='pc'||!g.path||(g.launch&&g.launch.args!==undefined&&g.launch.args!==null))return false;let dp=null;try{dp=directPlay(g.path);}catch{}if(!dp?.args)return false;g.launch={...(g.launch||{}),args:dp.args,argsSource:'port'};nglNote('Abrir direto no jogo: '+g.title+' com '+dp.args+' (como '+path.basename(dp.wrapper)+').');return true;}
+ // Port de console para PC (SpartanPort e parecidos) escolhido como se fosse emulador: entra como jogo de PC.
+ function portMainExe(target){let dir=target,exe='';try{if(fs.statSync(target).isFile()){dir=path.dirname(target);exe=target;}}catch{return null;}
+  let names=[];try{names=fs.readdirSync(dir).filter(n=>/\.exe$/i.test(n));}catch{return null;}
+  const marker=names.length&&(fs.existsSync(path.join(dir,'spartanport'))||names.some(n=>/spartanport/i.test(n))||fs.existsSync(path.join(dir,'settings.json'))&&names.some(n=>/^play /i.test(n)));
+  const pick=()=>{const main=names.filter(n=>!/^(play|start|launch|run)\b/i.test(n)&&!/spartanport|unins|crash|setup/i.test(n)).map(n=>path.join(dir,n));const withWrapper=main.find(f=>{try{return !!directPlay(f)?.args;}catch{return false;}});if(withWrapper)return withWrapper;return main.sort((a,b)=>{try{return fs.statSync(b).size-fs.statSync(a).size;}catch{return 0;}})[0]||'';};
+  if(exe&&/^(play|start|launch|run)\b/i.test(path.basename(exe))||exe&&/spartanport/i.test(path.basename(exe)))exe=pick()||exe;
+  const candidate=exe||pick();if(!candidate)return null;let port=null;try{port=consoleTitleNear(candidate);}catch{}
+  return port||marker?{exe:candidate,port}:null;}
+ async function addPortGame(found){const existing=db.games.find(g=>!g.demo&&g.path&&String(g.path).toLowerCase()===found.exe.toLowerCase());if(existing){existing.hidden=false;persist();return existing;}
+  const adopted=await adoptPorts([{path:found.exe,root:path.dirname(found.exe),title:found.port?.title||''}]);if(adopted[0])return getGame(adopted[0].id);
+  const r=await addFiles([found.exe]);const g=r.addedIds?.[0]&&getGame(r.addedIds[0]);if(!g)throw Error(r.errors?.[0]?.message||'Não foi possível adicionar este port.');
+  g.profile='pc';g.platformKey='pc';g.needsReview=false;g.gameRoot=path.dirname(found.exe);if(found.port?.title){g.title=found.port.title;g.titleSource='port';}applyDirectPlay(g);persist();
+  (async()=>{try{await quickCover(g,null);}catch{}try{await autoSteamLink(g);}catch{}try{await providers.completeMissing?.(g);}catch{}persist();try{await autoAddToSteam([g.id]);}catch{}})();return g;}
  async function adoptPorts(candidates){
   const adopted=[];
   for(const it of candidates||[]){
@@ -267,6 +502,8 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
  if(db.games.map(ensureDemoSize).some(Boolean))persist();
  // 1.9.2: a limpeza automática do NativeGameLink desligava a página de jogos adicionados com a Steam aberta
  // (o atalho ainda não estava no shortcuts.vdf). Religa as páginas desligadas desse jeito.
+ // 2.5.8: ports conhecidos e o RetroAchievements pelo console certo: quem já tentou antes tenta de novo agora.
+ if(!config.raRetry258){config.raRetry258=true;saveConfig();let n=0;for(const g of db.games)if(g.raLookupAt&&!g.raId){delete g.raLookupAt;n++;}if(n)save(dbFile,db);}
  if(!config.nglRepair192){let n=0;for(const g of db.games)if(g.nglDismissed){delete g.nglDismissed;n++;}config.nglRepair192=true;saveConfig();if(n)save(dbFile,db);}
  // 2.2.3: jogos de loja/PC que perderam a ligação com a Steam (limpeza automática do NGL) são procurados de novo.
  if(!config.steamRelink223){config.steamRelink223=true;saveConfig();const todo=db.games.filter(g=>!g.demo&&!g.hidden&&['pc','custom','store'].includes(g.profile)&&!g.steamLinkDisabled&&!steamAppIdFor(g));for(const g of todo){delete g.storeSteamCheckedAt;delete g.steamNameCheckedAt;}if(todo.length)save(dbFile,db);}
@@ -277,7 +514,7 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
  // os atalhos da Steam ficam pendentes e são regravados apontando para o executável novo.
  const exeMark=launcherExecutable&&!/(^|[\\/])TaigaPSP\.exe$/i.test(launcherExecutable)?windowsPath(launcherExecutable):null;
  const signature=g=>digest(JSON.stringify([g.title,launcherExecutable&&!g.demo?g.uuid:g.path,...(exeMark&&!g.demo?[exeMark]:[]),g.demo?demoExecutable:launcherExecutable||config.emulator,launcherExecutable?null:g.profile,launcherExecutable?null:g.launch,launcherExecutable?null:config.launchers,g.media,Object.entries(g.art||{}).sort(),g.metadata,g.raId,g.bytes,g.installedBytes,g.platformName,g.sizeSynthetic,g.sizeBasis,g.sizeApproximate,[g.steamLink?.appId,g.steamLink?.about,g.steamLink?.language]]));
- const isFile=p=>{try{return fs.statSync(p).isFile();}catch{return false;}};
+ const isFile=p=>{try{return fs.statSync(p).isFile();}catch(e){return /\.exe$/i.test(String(p))&&(e?.code==='EPERM'||e?.code==='EACCES');}};
  const metadataView=g=>{const m={...(g.metadata||{})};if(config.language&&m.summaryLanguage&&m.summaryLanguage!==config.language&&!g.metadataPinned?.summary&&m.summaryOriginal){m.summary=m.summaryOriginal;m.summaryLanguage=m.summaryOriginalLanguage||'en';}return m;};
  const sessions=new SessionStore(dataDir);let discoveryResult=null,scanStatus={newCandidates:0,errors:[]};
  const steamLaunchFor=g=>{const direct=launchFor(g,config,demoExecutable);const command=launcherExecutable&&!g.demo?{exe:launcherExecutable,args:'--taiga-launch '+g.uuid}:direct;return process.platform==='linux'?hostLaunch(command.exe,command.args,config.steamDir,dataDir):command;};
@@ -295,7 +532,9 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
   if(platformOf(g)?.ra&&!['ps3','vita3k','shadps4'].includes(g.profile))return 'ra';return null;};
  const accountConnected=kind=>kind==='xbox'?!!config.xboxAuth?.msa:kind==='epic'?!!config.epicAuth?.accessToken:kind==='gog'?!!String(config.gogUser||'').trim():kind==='ra'?raConnected():true;
  const accountNeedOf=g=>{if(g.hidden)return null;const kind=accountKindOf(g);return kind&&!accountConnected(kind)?kind:null;};
- const privateGame=g=>({...publicGame(g),consoleTwin:g.consoleTwin||null,mergedInto:g.mergedInto||null,accountKind:accountKindOf(g),accountNeed:accountNeedOf(g),fromShortcut:!!g.shortcutSource,storeLabel:g.store?.label||'',suspectedAuxiliary:!g.demo&&(auxiliaryExecutable(g.path)||/\.bin$/i.test(g.path)&&!g.discId&&g.profile!=='ps3'),path:g.path,launch:g.launch||{},achievementSettings:g.achievementSettings||{},metadataSteamAppId:g.metadataSteamAppId||null,launchReady:(()=>{try{if(!g.demo&&!isFile(g.path))return false;launchFor(g,config,demoExecutable);return true;}catch{return false;}})(),lookup:g.lookup||null,steamCandidates:steamSnapshot.filter(e=>normalize(e.title)===normalize(g.title)).map(e=>({appId:e.appId,title:e.title,exe:e.exe,path:e.path})),artPinned:g.artPinned||{}});
+ // Atalhos da Steam agrupados pelo nome normalizado (refeito só quando a lista muda).
+ let steamTitleMap=null,steamTitleSrc=null;const steamByTitle=()=>{if(steamTitleSrc!==steamSnapshot){steamTitleSrc=steamSnapshot;steamTitleMap=new Map();for(const e of steamSnapshot||[]){const k=normalize(e.title);if(!steamTitleMap.has(k))steamTitleMap.set(k,[]);steamTitleMap.get(k).push(e);}}return steamTitleMap;};
+ const privateGame=g=>({...publicGame(g),consoleTwin:g.consoleTwin||null,mergedInto:g.mergedInto||null,accountKind:accountKindOf(g),accountNeed:accountNeedOf(g),fromShortcut:!!g.shortcutSource,storeLabel:g.store?.label||'',notInstalled:!!g.notInstalled,install:g.notInstalled?installState(g):null,suspectedAuxiliary:!g.demo&&(auxiliaryExecutable(g.path)||/\.bin$/i.test(g.path)&&!g.discId&&g.profile!=='ps3'),path:g.path,launch:g.launch||{},achievementSettings:g.achievementSettings||{},metadataSteamAppId:g.metadataSteamAppId||null,launchReady:(()=>{try{if(!g.demo&&!g.notInstalled&&!isFile(g.path))return false;launchFor(g,config,demoExecutable);return true;}catch{return false;}})(),lookup:g.lookup||null,steamCandidates:(steamByTitle().get(normalize(g.title))||[]).map(e=>({appId:e.appId,title:e.title,exe:e.exe,path:e.path})),storeCover:!!(g.storeImages?.cover&&!g.art?.cover),artPinned:g.artPinned||{}});
  async function addFiles(paths){let added=0,skipped=0;const inspected=await inventory('inspect',paths),errors=[...inspected.errors],addedIds=[],duplicates=[];
   for(const info of inspected.items)try{const file=info.path,old=db.games.find(g=>windowsPath(g.path)===windowsPath(info.path));if(old){skipped++;continue;}
    // Jogo já identificado na coleção (mesmo código de disco, arquivo idêntico, mesmo arquivo por outro caminho): não entra de novo.
@@ -305,7 +544,7 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
  }
  const duplicateMessage=d=>({serial:'Este jogo já está na coleção como "'+d.title+'" (mesmo código do disco).',identical:'Este arquivo é uma cópia idêntica de "'+d.title+'", que já está na coleção.',path:'Este arquivo já está na coleção como "'+d.title+'".',store:'Este jogo da loja já está na coleção como "'+d.title+'".',steam:'Este jogo já está na coleção como "'+d.title+'" (mesmo jogo da Steam).',port:'Esta é a pasta do console usada pelo port "'+d.title+'", que já está na coleção.'})[d.reason]||'Já está na coleção.';
  // Separa da lista da busca o que já está na coleção (inclusive por outro caminho) e cópias repetidas na própria busca.
- function splitDuplicates(items,existing){const fresh=[];for(const item of items){const dup=duplicateOf(db.games,item,{steamAppIdOf:steamAppIdFor,portOf});if(dup){if(!existing.some(e=>e.id===dup.game.id))existing.push({id:dup.game.id,title:dup.game.title,path:dup.game.path,hidden:!!dup.game.hidden,duplicate:dup.reason,file:item.path});continue;}const twin=duplicateOf(fresh.map(f=>({...f,profile:f.profile})),item);if(twin)continue;fresh.push(item);}return fresh;}
+ function splitDuplicates(items,existing){const fresh=[];for(const item of items){const dup=duplicateOf(db.games,item,{steamAppIdOf:steamAppIdFor,portOf});if(dup){if(dup.game.notInstalled&&item.store?.name&&isFile(item.path)){convertInstalled(dup.game,{store:item.store.name,storeName:item.store.label,id:item.store.id,namespace:item.store.namespace,appName:item.store.appName,url:item.store.url,needsLauncher:item.store.needsLauncher,launcherExe:item.store.launcherExe,path:item.path,root:item.gameRoot});persist();}if(!existing.some(e=>e.id===dup.game.id))existing.push({id:dup.game.id,title:dup.game.title,path:dup.game.path,hidden:!!dup.game.hidden,duplicate:dup.reason,file:item.path});continue;}const twin=duplicateOf(fresh.map(f=>({...f,profile:f.profile})),item);if(twin)continue;fresh.push(item);}return fresh;}
  const platformOf=g=>platformByKey(g.platformKey)||platformByName(g.platformName);
  // Guarda as opções de uma busca para o usuário escolher depois (cartões agrupados por jogo).
  const choiceCards=(found,{platformKey=null,query=''}={})=>externalResults(found,{platformKey,query}).map((option,i)=>{const key=crypto.randomBytes(16).toString('hex');externalChoices.set(key,{...option,at:Date.now()});const preferred=preferredPlatform(option,platformKey);return {key,name:option.name,platforms:option.platforms,preview:externalPreview(option)||(option.sgdb?.id||option.igdb?.name?'/choice-art/'+key:''),source:option.igdb?'IGDB':option.free?'libretro':'SteamGridDB',year:option.year??(option.igdb?.first_release_date?new Date(option.igdb.first_release_date*1000).getUTCFullYear():null),platformMatch:option.platformMatch,score:Math.round((option.score||0)*100)/100,best:i===0&&(option.score||0)>=.85&&option.platformMatch!==false,preferredPlatform:preferred?.name||null};});
@@ -327,7 +566,8 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
   const target=scriptTarget();
   if(config.steamDir&&isFile(target))try{readiness.integration=fs.readFileSync(target,'utf8').includes('Taiga Steam PSP 1.2')&&fs.readFileSync(target,'utf8').includes(config.readToken);}catch{}
   let raStatus=null;try{raStatus=providers.retro?.status()||null;}catch{}
-  return {platform:process.platform,capabilities:{automaticUpdates:process.platform==='win32',portablePackage:process.platform==='win32',emulatorDownloads:process.platform==='win32'},version:VERSION,githubRepo:updateRepo,discoveredAt:config.discoveredAt||null,profileServer:config.profileServer||'',discordClientId:config.discordClientId||'',discordReady:/^\d{17,20}$/.test(discordAppId()),shortcutFolder:config.shortcutFolder||'',publicProfileFile:path.join(dataDir,'public-profile.json'),epicAccount:config.epicAccount||'',epicLogin:config.epicAuth?.accountId?{name:config.epicAuth.displayName||'',id:config.epicAuth.accountId}:null,epicLoginAvailable:!!epicLogin,xboxLogin:config.xboxAuth?.msa?{name:config.xboxAuth.gamertag||''}:null,xboxLoginAvailable:!!xboxLogin,psnLoginAvailable:!!psnLogin,psnLogin:config.psnAuth?.access?{name:config.psnAuth.name||''}:null,epicDetected:achievementManager.epicAccount()&&!config.epicAccount&&!config.epicAuth?.accountId?{id:achievementManager.epicAccount(),source:achievementManager.epicSource()}:null,gogUser:config.gogUser||'',injectSteam:config.injectSteam!==false,autoRestartSteam:config.autoRestartSteam===true,steamNeedsRestart:integration.needsRestart&&config.injectSteam!==false,steamDebugPort:Number(config.steamDebugPort)||DEFAULT_DEBUG_PORT,platforms:platformList(),ra:raStatus,vita3kRoot:config.vita3kRoot||'',shadps4Root:config.shadps4Root||'',ps4TrophyKey:config.ps4TrophyKey||'',raUseEmulatorAccounts:config.raUseEmulatorAccounts!==false,launcherReady:!!launcherExecutable,emulatorNames:[...new Set([...(emulatorFile(config.emulator)?['PPSSPP']:[]),...Object.entries(config.launchers||{}).filter(([,l])=>emulatorFile(l.exe)).map(([p])=>PROFILES[p]?.name).filter(Boolean)])],emulatorDiscovery:discoveryResult,scanStatus,language:config.language||sysLang,languageChosen:!!config.language,achievementRoot:config.achievementRoot||'',rpcs3Root:config.rpcs3Root||'',rpcs3User:config.rpcs3User||'00000001',profiles:PROFILES,launchers:config.launchers||{},emulator:config.emulator,steamDir:config.steamDir,scriptDir:config.scriptDir||'',scriptFile:scriptTarget(),account:config.account,roots:config.roots,raUser:config.raUser,preferences:config.preferences,credentials:Object.fromEntries(['sgdbKey','igdbId','igdbSecret','raKey','steamKey','raToken'].map(k=>[k,!!config[k]])),accounts,readiness,integrationStatus};
+  let raCores=null;if(isFile(config.launchers?.retroarch?.exe))try{raCores=retroArchPlatforms(config.launchers.retroarch.exe,config.launchers.retroarch);}catch{raCores=[];}
+  return {platform:process.platform,capabilities:{automaticUpdates:process.platform==='win32',portablePackage:process.platform==='win32',emulatorDownloads:process.platform==='win32'},version:VERSION,setupDone:!!config.setupDone,seenVersion:config.seenVersion||'',supportHideUntil:Number(config.supportHideUntil)||0,supportLinks:config.supportLinks||{},retroarchAsked:!!config.retroarchAsked,emuCollectionName:config.emuCollectionName||'',retroarchPlatforms:raCores,epicInstallDir:config.epicInstallDir||'',epicInstallDefault:defaultEpicDir(),storeLogins:{epic:!!config.epicAuth,xbox:!!config.xboxAuth},notInstalledCount:db.games.filter(g=>g.notInstalled&&!g.hidden).length,githubRepo:updateRepo,discoveredAt:config.discoveredAt||null,profileServer:config.profileServer||'',discordClientId:config.discordClientId||'',discordReady:/^\d{17,20}$/.test(discordAppId()),shortcutFolder:config.shortcutFolder||'',publicProfileFile:path.join(dataDir,'public-profile.json'),epicAccount:config.epicAccount||'',epicLogin:config.epicAuth?.accountId?{name:config.epicAuth.displayName||'',id:config.epicAuth.accountId}:null,epicLoginAvailable:!!epicLogin,xboxLogin:config.xboxAuth?.msa?{name:config.xboxAuth.gamertag||''}:null,xboxLoginAvailable:!!xboxLogin,psnLoginAvailable:!!psnLogin,psnLogin:config.psnAuth?.access?{name:config.psnAuth.name||''}:null,epicDetected:achievementManager.epicAccount()&&!config.epicAccount&&!config.epicAuth?.accountId?{id:achievementManager.epicAccount(),source:achievementManager.epicSource()}:null,gogUser:config.gogUser||'',injectSteam:config.injectSteam!==false,autoRestartSteam:config.autoRestartSteam===true,steamNeedsRestart:integration.needsRestart&&config.injectSteam!==false,steamDebugPort:Number(config.steamDebugPort)||DEFAULT_DEBUG_PORT,platforms:platformList(),ra:raStatus,vita3kRoot:config.vita3kRoot||'',shadps4Root:config.shadps4Root||'',ps4TrophyKey:config.ps4TrophyKey||'',raUseEmulatorAccounts:config.raUseEmulatorAccounts!==false,launcherReady:!!launcherExecutable,emulatorNames:[...new Set([...(emulatorFile(config.emulator)?['PPSSPP']:[]),...Object.entries(config.launchers||{}).filter(([,l])=>emulatorFile(l.exe)).map(([p])=>PROFILES[p]?.name).filter(Boolean)])],emulatorDiscovery:discoveryResult,scanStatus,language:config.language||sysLang,languageChosen:!!config.language,achievementRoot:config.achievementRoot||'',rpcs3Root:config.rpcs3Root||'',rpcs3User:config.rpcs3User||'00000001',profiles:PROFILES,launchers:config.launchers||{},emulator:config.emulator,steamDir:config.steamDir,scriptDir:config.scriptDir||'',scriptFile:scriptTarget(),account:config.account,roots:config.roots,raUser:config.raUser,preferences:config.preferences,credentials:Object.fromEntries(['sgdbKey','igdbId','igdbSecret','raKey','steamKey','raToken'].map(k=>[k,!!config[k]])),accounts,readiness,integrationStatus};
  }
  function validatePaths(requireEmulator=true){
   if(requireEmulator&&!isFile(config.launchers?.psp?.exe)&&(!isFile(config.emulator)||guessProfile(config.emulator)!=='psp'))throw Error('Selecione PPSSPPWindows64.exe ou PPSSPPWindows.exe nas configurações.');
@@ -342,6 +582,44 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
  }
  const liveScript=()=>fs.readFileSync(path.join(ROOT,'steam/live-sync.js'),'utf8');
  async function liveReady(){if(!injector||config.injectSteam===false)return false;try{return await injector.evaluateShared('!!(window.SteamClient&&window.SteamClient.Apps&&typeof window.SteamClient.Apps.AddShortcut==="function"&&window.appStore)')===true;}catch{return false;}}
+ // Coleções de um jogo na Steam: "Taiga Launcher" e, com a opção ligada, a coleção da loja ("Epic Games", "Xbox"...).
+ const EMU_COLLECTION={'pt-BR':'Emuladores',en:'Emulators',es:'Emuladores',fr:'Émulateurs',de:'Emulatoren'};
+ const emuCollectionLabel=()=>config.emuCollectionName||(config.emuCollectionName=EMU_COLLECTION[config.language||sysLang]||EMU_COLLECTION.en);
+ const isEmulatorGame=g=>!!g&&!g.native&&!g.demo&&!g.store&&!['pc','store','custom'].includes(g.profile||'psp');
+ // Coleção do jogo por grupo: a loja ("Epic Games", "Xbox"...) ou "Emuladores", cada uma com a sua opção.
+ const groupCollectionName=(g,{all=false}={})=>{if(!g)return '';if(g.store?.label)return all||config.preferences.storeCollections?String(g.store.label).slice(0,60):'';if(isEmulatorGame(g))return all||config.preferences.emuCollection?emuCollectionLabel():'';return '';};
+ const storeCollectionName=g=>groupCollectionName(g);
+ const storeLabels=()=>[...new Set([...db.games.map(g=>g.store?.label).filter(Boolean).map(l=>String(l).slice(0,60)),...(config.emuCollectionName?[config.emuCollectionName]:[])])];
+ // Coleções por loja para a gravação com a Steam fechada: cada loja recebe os atalhos dos seus jogos.
+ const storeCollectionSpecs=updates=>{if(!config.preferences.storeCollections&&!config.preferences.emuCollection)return [];const idOf=g=>{const p=updates.find(([item])=>item.id===g.id);return p?p[1]:g.bindings?.[config.account];};const specs=new Map();
+  for(const g of db.games){const name=storeCollectionName(g);if(!name)continue;const spec=specs.get(name)||{name,add:[],remove:[]};const id=idOf(g);if(id&&!g.hidden)spec.add.push(id);specs.set(name,spec);}
+  for(const [g,id] of updates)if(!id){const name=storeCollectionName(g);const old=g.bindings?.[config.account];if(name&&old){const spec=specs.get(name)||{name,add:[],remove:[]};spec.remove.push(old);specs.set(name,spec);}}
+  return [...specs.values()];};
+ // Liga/desliga as coleções por loja. Steam aberta com a integração: na hora; fechada: no arquivo de coleções.
+ async function applyStoreCollections(){
+  if(!config.steamDir||!config.account)return {ok:false};
+  // Cada grupo liga ou desliga pela sua opção: lojas (storeCollections) e emuladores (emuCollection).
+  const groups=new Map(),onFor=new Map();
+  for(const g of db.games){if(g.demo||g.hidden)continue;const name=groupCollectionName(g,{all:true});if(!name)continue;const id=Number(g.bindings?.[config.account])>>>0;if(!id)continue;(groups.get(name)||groups.set(name,[]).get(name)).push(id);onFor.set(name,g.store?.label?!!config.preferences.storeCollections:!!config.preferences.emuCollection);}
+  const on=[...onFor.values()].some(Boolean);
+  const made=new Set(config.storeCollectionsMade||[]);
+  if(await win.running().catch(()=>false)){
+   if(!(await liveReady()))return {ok:false,pending:true};
+   const script=`(async function(groups,onMap,made){const cs=window.collectionStore;if(!cs)return 'no';const find=n=>Array.from(cs.userCollections||[]).find(c=>c&&!c.bIsDynamic&&(c.displayName===n||c.m_strName===n));const ov=id=>{try{return window.appStore.GetAppOverviewByAppID(id>>>0)}catch(e){return null}};const out=[];
+    for(const [name,ids] of groups){let col=find(name);const on=!!onMap[name];if(on){if(!col&&cs.NewUnsavedCollection){col=cs.NewUnsavedCollection(name,undefined,[]);if(col&&col.Save)await col.Save();out.push(name);}if(col&&col.AsDragDropCollection){const apps=ids.map(ov).filter(Boolean);if(apps.length)col.AsDragDropCollection().AddApps(apps);if(col.Save)await col.Save();}}
+     else if(col&&made.includes(name)){try{const apps=ids.map(ov).filter(Boolean);if(apps.length&&col.AsDragDropCollection)col.AsDragDropCollection().RemoveApps(apps);if(col.Save)await col.Save();}catch(e){}try{const left=(col.allApps||col.visibleApps||[]).length;if(!left){if(typeof col.Delete==='function')await col.Delete();else if(typeof cs.DeleteCollection==='function')await cs.DeleteCollection(col.id);}}catch(e){}}}
+    return JSON.stringify(out);})`;
+   let r='';try{r=await injector.evaluateShared(script+'('+JSON.stringify([...groups])+','+JSON.stringify(Object.fromEntries(onFor))+','+JSON.stringify([...made])+')');}catch(e){throw Error('A Steam não respondeu: '+e.message);}
+   try{for(const n of JSON.parse(r)||[])made.add(n);}catch{}
+  }else{
+   const onList=[...groups].filter(([n])=>onFor.get(n)),offList=[...groups.keys()].filter(n=>!onFor.get(n)&&made.has(n));
+   if(onList.length)for(const [f,b] of collectionWrites(config.steamDir,config.account,[],[],onList.map(([name,add])=>({name,add}))))atomic(f,b);
+   if(offList.length)for(const [f,b] of collectionDelete(config.steamDir,config.account,{storeNames:offList,main:false}))atomic(f,b);
+   for(const [n] of onList)made.add(n);
+  }
+  for(const [n,v] of onFor)if(!v)made.delete(n);config.storeCollectionsMade=[...made];saveConfig();return {ok:true,on,collections:[...groups.keys()].filter(n=>onFor.get(n))};
+ }
+ const collectionNamesFor=g=>[config.preferences.autoCollection!==false?'Taiga Launcher':'',storeCollectionName(g)].filter(Boolean);
  async function syncLive(games,{remove=false,fallback=false}={}){
   const grid=path.join(config.steamDir,'userdata',config.account,'config','grid'),script=liveScript(),results=[],failures=[],failedIds=[];
   for(const g of games){
@@ -353,13 +631,13 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
      const type={cover:0,hero:1,logo:2,wide:3}[kind];if(type===undefined||!['png','jpg'].includes(ext))continue;art.push({type,ext,b64:bytes.toString('base64')});}
     if(!icon)icon=launcherIcon(grid);
     item={appid:previousId,name:g.title,exe:'"'+exe+'"',startDir:'"'+path.dirname(exe)+'"',options:launch.args||'',icon,art:[],taken:db.games.filter(o=>o!==g&&!o.demo&&o.bindings?.[config.account]).map(o=>Number(o.bindings[config.account])>>>0)};item.pendingArt=art;}
-   const run=async it=>{let r=null;try{r=JSON.parse(await injector.evaluateShared('('+script+')('+JSON.stringify(it)+','+JSON.stringify(config.preferences.autoCollection!==false?'Taiga Launcher':'')+')'));}catch{}return r;};
+   const run=async it=>{let r=null;try{r=JSON.parse(await injector.evaluateShared('('+script+')('+JSON.stringify(it)+','+JSON.stringify(collectionNamesFor(g))+')'));}catch{}return r;};
    const pendingArt=item.pendingArt||[];delete item.pendingArt;
    // Sem resposta: tenta de novo uma vez (o script reaproveita o atalho se a primeira chamada já o criou).
    let r=await run(item);if(!r?.ok&&!r?.error){nglNote('Steam sem resposta ao adicionar '+g.title+'; tentando de novo.');await new Promise(res=>setTimeout(res,1500));r=await run(item);}
    if(!r?.ok){failures.push(g.title+': '+(r?.error||'sem resposta da Steam'));failedIds.push(g.id);continue;}
    for(const a of pendingArt){const ra=await run({appid:Number(r.appid)>>>0,artOnly:true,art:[a]});if(!ra?.ok)nglNote('Arte não aplicada ao vivo em '+g.title+' (tipo '+a.type+').');}
-   g.bindings||={};g.applied||={};if(remove){delete g.bindings[config.account];delete g.applied[config.account];}else{g.bindings[config.account]=Number(r.appid)>>>0;g.applied[config.account]=signature(g);g.liveAdded={...(g.liveAdded||{}),[config.account]:Date.now()};}
+   g.bindings||={};g.applied||={};if(remove){delete g.bindings[config.account];delete g.applied[config.account];g.steamRemoved={...(g.steamRemoved||{}),[config.account]:true};}else{if(g.steamRemoved)delete g.steamRemoved[config.account];g.bindings[config.account]=Number(r.appid)>>>0;g.applied[config.account]=signature(g);g.liveAdded={...(g.liveAdded||{}),[config.account]:Date.now()};}
    results.push({id:g.id,title:g.title,appId:Number(r.appid)>>>0,account:config.account,live:true,reused:!r.created});
   }
   persist();injector.reload().catch(()=>{});
@@ -373,14 +651,14 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
  function sync(ids,opts={}){const run=syncChain.then(()=>syncNow(ids,opts));syncChain=run.catch(()=>{});return run;}
  async function syncNow(ids,{remove=false,restart=false,openSteam=false,installIntegration=true,adopt={},classic=false,dropCollection=false}={}){
   validatePaths(false);if(!Array.isArray(ids))throw Error('Seleção inválida.');const games=[...new Set(ids)].map(getGame);if(!games.length)throw Error('Selecione pelo menos um jogo.');
-  if(!remove)for(const g of games){if(!g.demo&&!isFile(g.path))throw Error('Jogo não encontrado: '+g.title);launchFor(g,config,demoExecutable);}
-  const wasRunning=await win.running(),active=wasRunning?await win.activeAccount(config.steamDir):null;if(active&&active!==config.account)throw Error('A conta selecionada não é a conta aberta na Steam. Selecione a conta '+active+' nas configurações para aplicar nesta Biblioteca.');
+  if(!remove)for(const g of games){if(!g.demo&&!g.notInstalled&&!isFile(g.path))throw Error('Jogo não encontrado: '+g.title);launchFor(g,config,demoExecutable);}
+  const wasRunning=await win.running({fresh:true}),active=wasRunning?await win.activeAccount(config.steamDir):null;if(active&&active!==config.account)throw Error('A conta selecionada não é a conta aberta na Steam. Selecione a conta '+active+' nas configurações para aplicar nesta Biblioteca.');
   // Steam aberta com a integração: adiciona/atualiza direto na Steam, sem fechar nem reiniciar.
   // Se a Steam recusar algum jogo ao vivo, ele é gravado do jeito clássico: fecha, grava e reabre a Steam.
   let liveResult=null;
   if(wasRunning&&!classic&&!Object.keys(adopt).length&&await liveReady()){liveResult=await syncLive(games,{remove,fallback:restart});if(!liveResult.failedIds.length)return liveResult;games.splice(0,games.length,...liveResult.failedIds.map(getGame));nglNote('Steam recusou ao vivo: '+liveResult.warnings.join(' · ')+', gravando com reinício.');}
   if(wasRunning&&!restart)throw Error('Feche a Steam pelo menu Steam > Sair ou marque a opção de reinício.');
-  if(wasRunning)await win.stopSteam(config.steamDir);if(await win.running())throw Error('Steam ainda aberta.');
+  if(wasRunning)await win.stopSteam(config.steamDir);if(await win.running({fresh:true}))throw Error('Steam ainda aberta.');
   const base=path.join(config.steamDir,'userdata',config.account,'config'),file=path.join(base,'shortcuts.vdf'),grid=path.join(base,'grid');
   const before=fs.existsSync(file)?fs.readFileSync(file):null,root=before?parseVDF(before):[];shortcuts(root);
   const updates=[],artWrites=[],results=[];const existing=shortcutInfo(root);
@@ -400,11 +678,11 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
    if(icon)upsert(root,{...launchGame,appId:id},executable,path.dirname(executable),icon);if(adopt[g.id]&&previousId&&previousId!==id&&!db.games.some(other=>other.id!==g.id&&other.bindings?.[config.account]===previousId)){const list=shortcuts(root),old=shortcutInfo(root).find(e=>e.appId===previousId);if(old&&windowsPath(old.path)===windowsPath(g.path)&&/ppssppwindows(?:64)?\.exe/i.test(old.exe)){const index=list.indexOf(old.node);if(index>=0)list.splice(index,1);list.forEach((n,i)=>n.key=String(i));}}updates.push([g,id]);results.push({id:g.id,title:g.title,appId:id,account:config.account,shortcutFile:file,art:appliedArts,reused:!!oldId});
    if(!isFile(path.join(grid,id+'.json')))artWrites.push([path.join(grid,id+'.json'),Buffer.from(JSON.stringify({appid:String(id)}))]);
   }
-  const encoded=encodeVDF(root);parseVDF(encoded);if(await win.running())throw Error('A Steam foi aberta durante a operação. Feche e tente novamente.');
+  const encoded=encodeVDF(root);parseVDF(encoded);if(await win.running({fresh:true}))throw Error('A Steam foi aberta durante a operação. Feche e tente novamente.');
   if((before&&(!fs.existsSync(file)||!fs.readFileSync(file).equals(before)))||(!before&&fs.existsSync(file)))throw Error('Os atalhos mudaram durante a operação. Tente novamente.');
   const backup=path.join(dataDir,'backups',config.account,Date.now()+'-shortcuts.vdf');if(before)atomic(backup,before);
   const stale=obsoleteArtwork(grid,artWrites.map(([dest])=>dest));
-  const collections=dropCollection?collectionDelete(config.steamDir,config.account):config.preferences.autoCollection?collectionWrites(config.steamDir,config.account,db.games.map(g=>{const pending=updates.find(([item])=>item.id===g.id);return pending?pending[1]:g.bindings?.[config.account];}).filter(Boolean),updates.filter(([,id])=>!id).map(([g])=>g.bindings?.[config.account]).filter(Boolean)):[];
+  const collections=dropCollection?collectionDelete(config.steamDir,config.account,{storeNames:storeLabels()}):config.preferences.autoCollection||config.preferences.storeCollections||config.preferences.emuCollection?collectionWrites(config.steamDir,config.account,config.preferences.autoCollection?db.games.map(g=>{const pending=updates.find(([item])=>item.id===g.id);return pending?pending[1]:g.bindings?.[config.account];}).filter(Boolean):[],config.preferences.autoCollection?updates.filter(([,id])=>!id).map(([g])=>g.bindings?.[config.account]).filter(Boolean):[],storeCollectionSpecs(updates)):[];
   const transaction=commitSteamFiles([...artWrites,[file,encoded],...collections],stale,path.join(dataDir,'backups','artwork',config.account,Date.now()+'-'+crypto.randomBytes(3).toString('hex')));
   const written=shortcutInfo(parseVDF(fs.readFileSync(file)));
   for(const r of results){const e=written.find(e=>e.appId===r.appId);if(!e||e.title!==r.title||(e.options!==steamLaunchFor(getGame(r.id)).args||windowsPath(e.exe)!==windowsPath(steamLaunchFor(getGame(r.id)).exe)))throw Error('A verificação do atalho gravado falhou. Há backup para recuperação.');for(const dest of Object.values(r.art))if(!isFile(dest))throw Error('A verificação de uma arte gravada falhou.');}
@@ -464,7 +742,26 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
  }
  let shortcutWatcher=null;
  function watchShortcutFolder(){try{shortcutWatcher?.close();}catch{}shortcutWatcher=null;const folder=config.shortcutFolder;if(!startInjector||!folder||!fs.existsSync(folder))return;let t=null;try{shortcutWatcher=fs.watch(folder,{recursive:false},()=>{clearTimeout(t);t=setTimeout(()=>{syncShortcutFolder().catch(()=>{});},1500);});}catch{}}
- const launchReadyFor=g=>{try{launchFor(g,config,demoExecutable);return isFile(g.path);}catch{return false;}};
+ const launchReadyFor=g=>{try{launchFor(g,config,demoExecutable);return !!g.notInstalled||isFile(g.path);}catch{return false;}};
+ // Emuladores ou preferência mudaram: jogo cujo emulador não está pronto passa para um que esteja (ex.: RetroArch com
+ // o núcleo da plataforma); com "Usar o RetroArch nas plataformas retrô", os retrô passam para ele (e voltam quando
+ // a opção é desligada). Os que ficaram prontos e ainda não estão na Steam entram nela.
+ async function reassignProfiles({addToSteam=true,startup=false}={}){
+  const changed=[],ready=[],anyInSteam=db.games.some(g=>!g.demo&&g.bindings?.[config.account]);
+  for(const g of db.games){
+   if(g.demo||g.hidden||g.native||g.notInstalled||g.launch?.exe||g.launch?.core||['pc','store','custom'].includes(g.profile||'psp'))continue;
+   const before=g.profile||'psp',wasReady=launchReadyFor(g),candidates=platformOf(g)?.profiles||[];
+   let next=preferredProfile(g,config,candidates);
+   // Opção desligada: quem foi para o RetroArch por causa dela volta para o emulador próprio, se estiver pronto.
+   if(!config.preferences?.retroarchFirst&&before==='retroarch'&&g.profileAuto==='retroarch'){const own=candidates.find(k=>k!=='retroarch');if(own){const back=preferredProfile({...g,profile:own},config,candidates);if(back!=='retroarch'&&launchReadyFor({...g,profile:back}))next=back;}}
+   if(next&&next!==before){g.profile=next;if(next==='retroarch'&&config.preferences?.retroarchFirst)g.profileAuto='retroarch';else delete g.profileAuto;changed.push(g);}
+   // Nunca esteve na Steam (não foi tirado de lá pelo usuário) e agora pode abrir: entra.
+   if(!g.bindings?.[config.account]&&!g.liveAdded?.[config.account]&&!g.steamRemoved?.[config.account]&&(!wasReady||next!==before||startup&&anyInSteam)&&launchReadyFor(g))ready.push(g.id);
+  }
+  if(changed.length){persist();nglNote('Emuladores: '+changed.length+' jogo(s) passaram para outro emulador pronto.');}
+  let steam=null;if(addToSteam&&ready.length)try{steam=await autoAddToSteam(ready);}catch{}
+  return {changed:changed.length,ready:ready.length,steam};
+ }
  let closed=false;const logFile=path.join(dataDir,'diagnostics.json');const log=(type,message)=>{try{const entries=json(logFile,[]);entries.push({at:new Date().toISOString(),type,message:String(message).slice(0,500)});save(logFile,entries.slice(-200));}catch{}};
  let waiting=0;
  // Discord: o jogo aberto aparece no perfil como um jogo da Steam (nome, capa, plataforma e tempo de sessão).
@@ -505,6 +802,7 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
    if(route==='/health')return send({name:'TaigaSteamPSP',version:VERSION});
    {const m=route.match(/^\/img\/pay\/(sponsors|pix|kofi)\.png$/);if(m){res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'max-age=86400'});return res.end(fs.readFileSync(path.join(ROOT,'web','pay',m[1]+'.png')));}}
    if(route==='/img/logo.png'||route==='/img/brand.png'||route==='/favicon.ico'){res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-cache'});return res.end(fs.readFileSync(path.join(ROOT,'web','logo.png')));}
+   if(/^\/img\/(?:ob-(?:store|collections)|news-(?:epic|comments|page))\.jpg$/.test(route)){res.writeHead(200,{'Content-Type':'image/jpeg','Cache-Control':'max-age=86400'});return res.end(fs.readFileSync(path.join(ROOT,'web',route.slice(5))));}
    if(route==='/img/trophy-steam.webp'){res.writeHead(200,{'Content-Type':'image/webp','Cache-Control':'max-age=86400'});return res.end(fs.readFileSync(path.join(ROOT,'web','trophy-steam.webp')));}
    if(route==='/assets/no-achievements.png'){res.writeHead(200,{'Content-Type':'image/png'});return res.end(fs.readFileSync(path.join(ROOT,'assets/no-achievements.png')));}
    if(req.method==='GET'&&/^\/choice-art\/[a-f0-9]{32}$/.test(route)){const option=externalChoices.get(route.slice(12));const fail=()=>{res.writeHead(404,{'Cache-Control':'no-store'});return res.end();};if(!option)return fail();try{let name=option.previewArt;if(!name){let id=option.sgdb?.id;if(!id&&option.igdb?.name&&providers.sgAvailable?.()){const found=await providers.sg('search/autocomplete/'+encodeURIComponent(option.igdb.name));const exact=(found||[]).find(s=>titleKey(s.name)===titleKey(option.igdb.name));id=exact?.id;}if(!id)return fail();const grids=await providers.sg('grids/game/'+Number(id)+'?dimensions=600x900&types=static&nsfw=false');const url=(grids||[]).find(g=>g.url)?.url;if(!url)return fail();name=await providers.image(url);option.previewArt=name;}const f=path.join(dataDir,'art',name);if(!isFile(f))return fail();res.writeHead(200,{'Content-Type':name.endsWith('.png')?'image/png':'image/jpeg','Cache-Control':'private, max-age=3600'});return res.end(fs.readFileSync(f));}catch{return fail();}}
@@ -513,6 +811,11 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
    if(req.method==='GET'&&route==='/exe-icon'){if(origin&&origin!==local&&origin!==`http://localhost:${port}`){res.writeHead(403);return res.end();}const exe=String(url.searchParams.get('p')||''),fail=()=>{res.writeHead(404,{'Cache-Control':'no-store'});return res.end();};if(!fileIcon||!iconAllow.has(windowsPath(exe))||!isFile(exe))return fail();try{let png=emuIcons.get(exe);if(!png){const src=iconSourceFor(exe,iconRoots.get(windowsPath(exe))||'');if(src.png){const b=fs.readFileSync(src.png);if(b.length<4*1024*1024&&imageType(b)==='png')png=b;}if(!png?.length)png=await fileIcon(src.exe||exe);if(!png?.length)return fail();emuIcons.set(exe,png);}res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'max-age=3600','X-Content-Type-Options':'nosniff'});return res.end(png);}catch{return fail();}}
    if(req.method==='GET'&&/^\/emu-icon\/[a-z0-9]+$/.test(route)){if(origin&&origin!==local&&origin!==`http://localhost:${port}`){res.writeHead(403);return res.end();}const profile=route.slice(10),exe=config.launchers?.[profile]?.exe||(profile==='psp'?config.emulator:'');const fail=()=>{res.writeHead(404,{'Cache-Control':'no-store'});return res.end();};if(!fileIcon||!exe||!isFile(exe))return fail();try{const key=exe+'|'+fs.statSync(exe).mtimeMs;let png=emuIcons.get(key);if(!png){png=await fileIcon(exe);if(!png?.length)return fail();emuIcons.set(key,png);}res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'max-age=3600','X-Content-Type-Options':'nosniff'});return res.end(png);}catch{return fail();}}
    if(req.method==='GET'&&/^\/brand\/(epic|gog|ra|xbox|psn)$/.test(route)){if(origin&&origin!==local&&origin!==`http://localhost:${port}`){res.writeHead(403);return res.end();}const r=await brandIcon(route.slice(7));if(!r){res.writeHead(404,{'Cache-Control':'no-store'});return res.end();}res.writeHead(200,{'Content-Type':r.type,'Cache-Control':'max-age=86400','X-Content-Type-Options':'nosniff'});return res.end(r.body);}
+   // Cartas dos jogos de emulador (SVG gerado com as imagens embutidas).
+   if(req.method==='GET'&&/^\/card\/[A-Za-z0-9_-]{1,64}\/\d{1,2}\.svg$/.test(route)){const [,,gid,n]=route.split('/');const g=db.games.find(x=>x.id===gid),it=g?.cardSet?.items?.[parseInt(n)];if(!it){res.writeHead(404);return res.end();}
+    const key=gid+':'+n+':'+g.cardSet.at+':'+(g.art?.logo||''),hit=cardCache.get(key);const svg=hit||cardSvg({image:path.join(dataDir,'art',path.basename(it.file)),name:it.name,kind:it.kind,logo:g.art?.logo?path.join(dataDir,'art',path.basename(g.art.logo)):'',title:g.title});if(!hit){cardCache.set(key,svg);if(cardCache.size>200)cardCache.delete(cardCache.keys().next().value);}
+    res.writeHead(200,{'Content-Type':'image/svg+xml; charset=utf-8','Cache-Control':'private, max-age=86400','X-Content-Type-Options':'nosniff'});return res.end(svg);}
+   if(req.method==='GET'&&route.startsWith('/store-art/')){const g=db.games.find(x=>x.id===route.slice(11));const url=g?.storeImages?.cover;if(!g||!url){res.writeHead(404);return res.end();}let name=g.art?.cover;if(!name){try{name=await providers.image(url);if(!g.art?.cover&&!g.artPinned?.cover){g.art={...(g.art||{}),cover:name};persistSoon();}}catch{res.writeHead(404);return res.end();}}const f=path.join(dataDir,'art',path.basename(name));if(!isFile(f)){res.writeHead(404);return res.end();}const b=fs.readFileSync(f);res.writeHead(200,{'Content-Type':imageType(b)==='png'?'image/png':imageType(b)==='ico'?'image/x-icon':'image/jpeg','Cache-Control':'private, max-age=600'});return res.end(b);}
    if(route.startsWith('/art/')){const name=route.slice(5);if(!/^[a-f0-9]+\.(png|jpg|ico)$/.test(name))throw Error('Imagem inválida');const f=path.join(dataDir,'art',name);if(!fs.existsSync(f)){res.writeHead(404);return res.end();}const stat=fs.statSync(f),etag='"'+stat.size+'-'+stat.mtimeMs+'"';res.setHeader('Cache-Control','private, max-age=0, must-revalidate');res.setHeader('ETag',etag);if(req.headers['if-none-match']===etag){res.writeHead(304);return res.end();}res.writeHead(200,{'Content-Type':name.endsWith('.jpg')?'image/jpeg':name.endsWith('.ico')?'image/x-icon':'image/png'});return res.end(fs.readFileSync(f));}
    if(!route.startsWith('/api/')){
     if(origin==='https://steamloopback.host'){res.writeHead(403);return res.end();}
@@ -560,7 +863,7 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
    try{
     if(route==='/api/native-art-apply'){const g=getGame(body.id);if(!g.native||g.account!==config.account)throw Error('Reabra a biblioteca da conta selecionada.');validatePaths(false);const grid=path.join(config.steamDir,'userdata',config.account,'config/grid'),writes=[];for(const [kind,name] of Object.entries(g.art||{})){const suffix={cover:'p',wide:'',hero:'_hero',logo:'_logo',icon:'_icon'}[kind];if(suffix===undefined)continue;let bytes=fs.readFileSync(path.join(dataDir,'art',path.basename(name))),ext=imageType(bytes);if(kind==='icon'){bytes=await iconBytes(bytes,iconResize);ext='ico';}writes.push([path.join(grid,g.appId+suffix+'.'+ext),bytes]);}if(!writes.length)throw Error('Escolha uma arte primeiro.');const wasRunning=await win.running();if(wasRunning){const active=await win.activeAccount(config.steamDir);if(active&&active!==config.account)throw Error('Selecione o perfil aberto na Steam antes de aplicar.');if(!body.restart)throw Error('Feche a Steam ou marque fechar e reabrir para aplicar.');await win.stopSteam(config.steamDir);}if(await win.running())throw Error('A Steam ainda está aberta.');const result=commitSteamFiles(writes,obsoleteArtwork(grid,writes.map(([f])=>f)),path.join(dataDir,'backups','native-art',config.account,Date.now().toString()));if(wasRunning&&body.restart)win.startSteam(config.steamDir,Number(config.steamDebugPort)||DEFAULT_DEBUG_PORT);return send({message:'Artes aplicadas. Confira na Steam.',result});}
     if(route==='/api/emulators-discover'){
-     const roots=body.paths||defaultDiscoveryRoots(config,{appRoot:launcherExecutable?path.dirname(launcherExecutable):ROOT});const found=await inventory('emulators',roots);discoveryResult=found;const applied=applyDiscovery(config,found);saveConfig();return send({applied,...found});
+     const roots=body.paths||defaultDiscoveryRoots(config,{appRoot:launcherExecutable?path.dirname(launcherExecutable):ROOT});const found=await inventory('emulators',roots);discoveryResult=found;const applied=applyDiscovery(config,found,{force:true});saveConfig();clearRetroArchCache();const moved=await reassignProfiles();return send({applied,moved:moved.changed,readyGames:moved.ready,...found});
     }
     // Aba Emuladores: cada emulador configurado, os jogos dele e as pastas de jogos que ele mesmo usa.
     if(route==='/api/emulators'){
@@ -570,7 +873,8 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
       const fromCfg=cfgFolders.filter(f=>{const src=String(f.source||'').toLowerCase();return src&&(n.includes(src)||src.includes(n));}).map(f=>f.path);
       const fromGames=games.map(g=>path.dirname(g.gameRoot&&isFile(g.path)?g.path:g.path)).filter(Boolean);
       let folders=[];try{folders=collapseFolders([...fromCfg,...fromGames].filter(d=>{try{return fs.statSync(d).isDirectory();}catch{return false;}}).map(p=>({path:p,source:''}))).map(f=>f.path);}catch{folders=[...new Set(fromCfg)];}
-      return {profile:k,name,exe:l.exe,flatpakId:l.flatpakId||null,found:emulatorFile(l.exe),platforms:REGISTRY_PROFILES[k].platforms||[REGISTRY_PROFILES[k].platform].filter(Boolean),games:games.length,folders:folders.slice(0,6)};}).sort((a,b)=>b.games-a.games||a.name.localeCompare(b.name));
+      let platforms=REGISTRY_PROFILES[k].platforms?.length?REGISTRY_PROFILES[k].platforms:[REGISTRY_PROFILES[k].platform].filter(p=>p&&p!=='Não informada');if(k==='retroarch'){try{platforms=retroArchPlatforms(l.exe,l);}catch{platforms=[];}}
+      return {profile:k,name,exe:l.exe,flatpakId:l.flatpakId||null,found:emulatorFile(l.exe),platforms,games:games.length,folders:folders.slice(0,6),removable:true};}).sort((a,b)=>b.games-a.games||a.name.localeCompare(b.name));
      return send({items});
     }
     // Adicionar emulador pelo programa, por um atalho (.lnk) ou pela pasta dele; devolve as pastas de jogos que ele usa.
@@ -578,19 +882,44 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
      let target=String(body.path||'');if(!target)throw Error('Escolha o emulador.');
      if(/\.lnk$/i.test(target)){let t='';try{t=readShortcut?String(readShortcut(target)||''):'';}catch{}if(!t)try{t=lnkTarget(target);}catch{}if(!t)throw Error('Não foi possível ler este atalho. Escolha o programa do emulador.');target=t;}
      let exe='',profile='';const flatpak=resolveFlatpakEmulator(target);if(flatpak)target=flatpak.exe;
-     try{if(fs.statSync(target).isDirectory()){const found=[];const walk=(d,depth)=>{let list=[];try{list=fs.readdirSync(d,{withFileTypes:true});}catch{return;}for(const e of list){const f=path.join(d,e.name);if(e.isFile()&&(process.platform==='win32'?/\.exe$/i.test(e.name):!/\.exe$/i.test(e.name))){const p=guessProfile(f);if(p&&REGISTRY_PROFILES[p]?.files)found.push({f,p,known:(REGISTRY_PROFILES[p].files||[]).some(x=>x.toLowerCase()===e.name.toLowerCase())});}else if(e.isDirectory()&&depth<2&&!/^(\.|cache|shaders|logs|memcards|bios)$/i.test(e.name))walk(f,depth+1);}};walk(target,0);found.sort((a,b)=>b.known-a.known);if(found[0]){exe=found[0].f;profile=found[0].p;}if(!exe)throw Error('Não encontramos um emulador conhecido nesta pasta. Escolha o programa (.exe) do emulador.');}else{exe=target;profile=String(body.profile||'')||flatpak?.profile||guessProfile(exe)||'';}}catch(e){if(/^Não encontramos/.test(e.message))throw e;throw Error('Emulador não encontrado.');}
+     try{if(fs.statSync(target).isDirectory()){const found=[];const walk=(d,depth)=>{let list=[];try{list=fs.readdirSync(d,{withFileTypes:true});}catch{return;}for(const e of list){const f=path.join(d,e.name);if(e.isFile()&&(process.platform==='win32'?/\.exe$/i.test(e.name):!/\.exe$/i.test(e.name))){const p=guessProfile(f);if(p&&REGISTRY_PROFILES[p]?.files)found.push({f,p,known:(REGISTRY_PROFILES[p].files||[]).some(x=>x.toLowerCase()===e.name.toLowerCase())});}else if(e.isDirectory()&&depth<2&&!/^(\.|cache|shaders|logs|memcards|bios)$/i.test(e.name))walk(f,depth+1);}};walk(target,0);found.sort((a,b)=>b.known-a.known);if(found[0]){exe=found[0].f;profile=found[0].p;}if(!exe){const pf=portMainExe(target);if(pf){const g=await addPortGame(pf);return send({message:'Este é um port para PC, não um emulador: {0} foi adicionado como jogo.'.replace('{0}',g.title),port:true,gameId:g.id});}throw Error('Não encontramos um emulador conhecido nesta pasta. Escolha o programa (.exe) do emulador.');}}else{exe=target;profile=String(body.profile||'')||flatpak?.profile||guessProfile(exe)||'';}}catch(e){if(/^Não encontramos/.test(e.message))throw e;throw Error('Emulador não encontrado.');}
+     if(isFile(exe)&&(!profile||!REGISTRY_PROFILES[profile]?.files)){const pf=portMainExe(exe);if(pf){const g=await addPortGame(pf);return send({message:'Este é um port para PC, não um emulador: {0} foi adicionado como jogo.'.replace('{0}',g.title),port:true,gameId:g.id});}}
      if(!emulatorFile(exe))throw Error('Selecione um executável compatível com o sistema.');if(!profile||!REGISTRY_PROFILES[profile]?.files)throw Error('Não reconhecemos este emulador. Escolha o .exe de um emulador da lista (PPSSPP, PCSX2, DuckStation, Dolphin, RetroArch...).');
-     const old=config.launchers?.[profile]||{};config.launchers||={};config.launchers[profile]={...launcherSettings(old,profile,exe),...(flatpak?{flatpakId:flatpak.flatpakId,flatpakLocation:flatpak.flatpakLocation}:{})};if(profile==='psp')config.emulator=exe;saveConfig();
+     const old=config.launchers?.[profile]||{};config.launchers||={};config.launchers[profile]={...launcherSettings(old,profile,exe),...(flatpak?{flatpakId:flatpak.flatpakId,flatpakLocation:flatpak.flatpakLocation}:{})};if(profile==='psp')config.emulator=exe;config.emulatorIgnore=(config.emulatorIgnore||[]).filter(k=>k!==profile);saveConfig();clearRetroArchCache();await reassignProfiles();
      const name=emulatorDisplayName(profile,exe),n=name.toLowerCase();let folders=[];try{folders=emulatorGameFolders({launchers:config.launchers,emulator:config.emulator}).filter(f=>{const src=String(f.source||'').toLowerCase();return src&&(n.includes(src)||src.includes(n));}).map(f=>f.path).filter(d=>{try{return fs.statSync(d).isDirectory();}catch{return false;}});folders=[...new Set(folders)].slice(0,8);}catch{}
      return send({message:'{0} configurado.'.replace('{0}',name),profile,name,folders});
     }
+    // Tirar um emulador da lista: os jogos dele passam para outro emulador pronto para a plataforma (se houver).
+    if(route==='/api/emulator-remove'){
+     const profile=String(body.profile||'');if(!REGISTRY_PROFILES[profile]?.files||!config.launchers?.[profile]&&!(profile==='psp'&&config.emulator))throw Error('Emulador não encontrado.');
+     const name=emulatorDisplayName(profile,config.launchers?.[profile]?.exe||'');delete config.launchers[profile];if(profile==='psp')config.emulator='';
+     config.emulatorIgnore=[...new Set([...(config.emulatorIgnore||[]),profile])];saveConfig();clearRetroArchCache();
+     const r=await reassignProfiles();return send({message:'{0} removido.'.replace('{0}',name||profile),moved:r.changed});
+    }
+    // Primeiro uso: quantos jogos já podem ir para a Steam e o que falta (emulador por plataforma), sem excesso.
+    if(route==='/api/setup-summary'){
+     const list=db.games.filter(g=>!g.demo&&!g.hidden&&!g.native&&!g.notInstalled&&!['pc','store'].includes(g.profile||'psp'));
+     let ready=0,review=0;const groups=new Map();const ra=config.launchers?.retroarch?.exe;const raOk=isFile(ra);
+     for(const g of list){if((g.profile||'psp')==='custom'){review++;continue;}if(launchReadyFor(g)){ready++;continue;}if(!isFile(g.path))continue;
+      const name=g.platformName||'';const k=groups.get(name)||{platform:name,short:platformOf(g)?.short||name,count:0,profiles:platformOf(g)?.profiles||[]};k.count++;groups.set(name,k);}
+     const dl=new Set(downloadable().map(d=>d.profile));
+     const missing=[...groups.values()].sort((a,b)=>b.count-a.count).map(k=>{const prof=k.profiles.find(p=>dl.has(p)&&p!=='retroarch');const core=raOk&&!!retroArchCoreFor(k.platform,ra,config.launchers?.retroarch);return {platform:k.platform,short:k.short,count:k.count,retroarch:core,download:prof||null,downloadName:prof?downloadable().find(d=>d.profile===prof)?.name||'':'',need:(()=>{const own=k.profiles.find(p=>p!=='retroarch');return own?emulatorDisplayName(own)||REGISTRY_PROFILES[own]?.name||'':'RetroArch';})(),retroarchOption:k.profiles.includes('retroarch')};});
+     const retro=list.filter(g=>!MODERN.has(g.platformName)&&(g.profile||'psp')!=='custom').length;
+     return send({total:list.length,ready,review,missing,retroarch:{found:raOk,asked:!!config.retroarchAsked,on:!!config.preferences.retroarchFirst,retro},inSteam:list.filter(g=>g.bindings?.[config.account]).length});
+    }
     if(route==='/api/emulator-select'){
      // Qualquer .exe vale (versões renomeadas ou portáteis); sem perfil, o Taiga Launcher descobre qual emulador é.
-     const selected=String(body.exe||''),flatpak=resolveFlatpakEmulator(selected),exe=flatpak?.exe||selected,profile=String(body.profile||'')||flatpak?.profile||guessProfile(exe)||'';if(flatpak&&flatpak.profile!==profile)throw Error('Perfil de execução inválido.');if(!emulatorFile(exe)||!/\.exe$/i.test(exe)&&process.platform==='win32')throw Error('Selecione um executável compatível com o sistema.');if(!profile||!REGISTRY_PROFILES[profile]?.files)throw Error('Não reconhecemos este emulador. Escolha o .exe de um emulador da lista (PPSSPP, PCSX2, DuckStation, Dolphin, RetroArch...).');
-     const old=config.launchers?.[profile]||{};config.launchers||={};config.launchers[profile]={...launcherSettings(old,profile,exe),...(flatpak?{flatpakId:flatpak.flatpakId,flatpakLocation:flatpak.flatpakLocation}:{})};if(profile==='psp')config.emulator=exe;saveConfig();return send({message:'{0} configurado.'.replace('{0}',emulatorDisplayName(profile,exe)),profile});
+     const selected=String(body.exe||''),flatpak=resolveFlatpakEmulator(selected),exe=flatpak?.exe||selected,profile=String(body.profile||'')||flatpak?.profile||guessProfile(exe)||'';if(flatpak&&flatpak.profile!==profile)throw Error('Perfil de execução inválido.');if(!emulatorFile(exe)||!/\.exe$/i.test(exe)&&process.platform==='win32')throw Error('Selecione um executável compatível com o sistema.');if(!profile||!REGISTRY_PROFILES[profile]?.files){const pf=portMainExe(exe);if(pf){const g=await addPortGame(pf);return send({message:'Este é um port para PC, não um emulador: {0} foi adicionado como jogo.'.replace('{0}',g.title),port:true,gameId:g.id});}}if(!profile||!REGISTRY_PROFILES[profile]?.files)throw Error('Não reconhecemos este emulador. Escolha o .exe de um emulador da lista (PPSSPP, PCSX2, DuckStation, Dolphin, RetroArch...).');
+     const old=config.launchers?.[profile]||{};config.launchers||={};config.launchers[profile]={...launcherSettings(old,profile,exe),...(flatpak?{flatpakId:flatpak.flatpakId,flatpakLocation:flatpak.flatpakLocation}:{})};if(profile==='psp')config.emulator=exe;config.emulatorIgnore=(config.emulatorIgnore||[]).filter(k=>k!==profile);saveConfig();clearRetroArchCache();await reassignProfiles();return send({message:'{0} configurado.'.replace('{0}',emulatorDisplayName(profile,exe)),profile});
     }
+    if(route==='/api/store-library'){const r=await syncStoreLibrary();return send(r);}
+    if(route==='/api/store-install'){const g=getGame(body.id);return send(await startInstall(g,{via:['launcher','legendary'].includes(body.via)?body.via:'',dir:typeof body.dir==='string'?body.dir:'',shortcuts:body.shortcuts||null}));}
+    if(route==='/api/store-install-info'){const g=getGame(body.id);return send(await installInfo(g,{wait:!!body.wait}));}
+    if(route==='/api/store-install-pause'){const g=getGame(body.id);return send(await pauseInstall(g));}
+    if(route==='/api/store-install-cancel'){const g=getGame(body.id);return send(await cancelInstall(g));}
+    if(route==='/api/store-install-state'){const g=getGame(body.id);return send(installState(g));}
     if(route==='/api/play'){
-     const g=getGame(body.id);if(!launcherExecutable||g.native||g.demo)throw Error('Abra o aplicativo desktop para iniciar um jogo local.');if(!isFile(g.path))throw Error('Arquivo do jogo não encontrado.');launchFor(g,config,demoExecutable);
+     const g=getGame(body.id);if(!launcherExecutable||g.native||g.demo)throw Error('Abra o aplicativo desktop para iniciar um jogo local.');if(g.notInstalled)return send(await startInstall(g));if(!isFile(g.path))throw Error('Arquivo do jogo não encontrado.');launchFor(g,config,demoExecutable);
      const child=spawn(launcherExecutable,['--taiga-launch',g.uuid],{detached:true,stdio:'ignore',windowsHide:true});await new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});child.unref();return send({message:'Iniciando jogo.'});
     }
     if(route==='/api/job-retry'){queue.retry(body.id);return send({message:'Tarefa agendada novamente.'});}
@@ -613,7 +942,7 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
     if(route==='/api/bug-report'){const text=String(body.text||'').slice(0,4000).trim(),home=os.homedir(),user=path.basename(home);
      const clean=v=>String(v).split(home).join('%USERPROFILE%').replace(new RegExp('\\b'+user.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\b','gi'),'<usuario>').replace(/(token|key|password|senha|npsso|authorization)(["'\s:=]+)[^\s"',]+/gi,'$1$2<oculto>');
      const acc=configView().accounts||[],games=db.games.filter(g=>!g.demo&&!g.hidden);
-     const info=[`Taiga Launcher ${VERSION}`,`Windows ${os.release()} (${os.arch()}) · idioma ${config.language||sysLang}`,`Steam: ${config.steamDir?'configurada':'não configurada'} · integração ${config.injectSteam!==false?'ligada':'desligada'}${integration.needsRestart?' · precisa reiniciar':''}`,`Jogos: ${games.length} (na Steam: ${games.filter(g=>g.bindings?.[config.account]).length}; ligados a um AppID: ${games.filter(g=>steamAppIdFor(g)).length})`,`Contas: ${['epic','xbox','psn','gog','ra'].map(k=>k+(config[k+'Auth']||k==='ra'&&config.raToken||k==='gog'&&config.gogUser?' sim':' não')).join(', ')}`].join('\n');
+     const info=[`Taiga Launcher ${VERSION}`,`Windows ${os.release()} (${os.arch()}) · idioma ${config.language||sysLang}`,`Steam: ${config.steamDir?'configurada':'não configurada'} · integração ${config.injectSteam!==false?'ligada':'desligada'}${integration.needsRestart?' · precisa reiniciar':''}`,`Jogos: ${games.length} (na Steam: ${games.filter(g=>g.bindings?.[config.account]).length}; ligados a um AppID: ${games.filter(g=>steamAppIdFor(g)).length})`,`Lojas: ${games.filter(g=>g.notInstalled).length} não instalado(s) (na Steam: ${games.filter(g=>g.notInstalled&&g.bindings?.[config.account]).length}) · mostrar não instalados: ${config.preferences.showUninstalled?'sim':'não'}`,`Contas: ${['epic','xbox','psn','gog','ra'].map(k=>k+(config[k+'Auth']||k==='ra'&&config.raToken||k==='gog'&&config.gogUser?' sim':' não')).join(', ')}`].join('\n');
      let logs='';if(body.logs!==false){const tail=(f,n)=>{try{return fs.readFileSync(f,'utf8').split(/\r?\n/).filter(Boolean).slice(-n).join('\n');}catch{return '';}};const diag=json(path.join(dataDir,'diagnostics.json'),[]).slice(-30).map(e=>`${e.at} [${e.type}] ${e.message}`).join('\n');const failed=queue.jobs.filter(j=>j.status==='failed').slice(-10).map(j=>`${j.type}: ${j.error}`).join('\n');
       logs=['','── Registro da integração com a Steam ──',tail(nglLogFile,150),'','── Diagnóstico ──',diag,failed?'\n── Tarefas com erro ──\n'+failed:''].join('\n');}
      const report=clean(['── O que aconteceu ──',text||'(sem descrição)','','── Programa ──',info,logs].join('\n'));
@@ -630,7 +959,7 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
     }
     if(route==='/api/steam-unlink'){const game=getGame(body.id),appId=game.steamLink?.appId;delete game.steamLink;game.steamLinkDisabled=true;delete game.steamLinkPending;if(game.metadataSteamAppId===appId)delete game.metadataSteamAppId;delete game.steamFields;persist();return send({ok:true});}
     // Troféu de port marcado à mão (conquistado antes de o Taiga Launcher acompanhar o jogo).
-    if(route==='/api/port-trophy'){const g=getGame(body.id),trophy=Number(body.trophy);if(!Number.isInteger(trophy)||trophy<0||trophy>4095)throw Error('Troféu inválido.');const store=achievementManager.portStore,key=g.uuid||g.id;if(body.unlocked)store.record(key,trophy,Math.floor(Date.now()/1000),{manual:true});else if(store.get(key).manual?.[String(trophy)])store.remove(key,trophy);return send(await achievementManager.get(g,{quiet:true}));}
+    if(route==='/api/port-trophy'){const g=getGame(body.id),trophy=Number(body.trophy);if(!Number.isInteger(trophy)||trophy<0||trophy>2147483647)throw Error('Troféu inválido.');const store=achievementManager.portStore,key=g.uuid||g.id;if(body.unlocked)store.record(key,trophy,Math.floor(Date.now()/1000),{manual:true});else if(store.get(key).manual?.[String(trophy)])store.remove(key,trophy);return send(await achievementManager.get(g,{quiet:true}));}
     // Pacote do programa para outro PC (com as chaves de API deste PC; sem jogos, contas nem logins).
     // "Testar integração": confere cada peça e manda uma notificação de teste com som.
     if(route==='/api/integration-test'){const checks=[],add=(key,ok,extra={})=>checks.push({key,ok:!!ok,...extra});
@@ -646,9 +975,11 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
     // Desinstalar da Steam: tira todos os atalhos do programa e a coleção (a Steam é fechada e reaberta).
     if(route==='/api/steam-remove-all'){const ids=db.games.filter(g=>!g.demo&&g.bindings?.[config.account]).map(g=>g.id);const running=await win.running().catch(()=>false);
      if(running&&db.games.some(g=>g.uuid&&sessions.forGame(g.uuid,config.account)?.running))throw Error('Feche o jogo aberto antes de remover tudo da Steam.');
-     if(ids.length)await sync(ids,{remove:true,restart:running,openSteam:running,classic:true,dropCollection:true});else if(!running){for(const [f,b] of collectionDelete(config.steamDir,config.account))atomic(f,b);}
+     if(ids.length)await sync(ids,{remove:true,restart:running,openSteam:running,classic:true,dropCollection:true});else if(!running){for(const [f,b] of collectionDelete(config.steamDir,config.account,{storeNames:storeLabels()}))atomic(f,b);}
      if(body.integration){try{const m=cefMarker();if(m&&fs.existsSync(m))fs.rmSync(m);}catch{}config.injectSteam=false;saveConfig();}
      for(const g of db.games)if(g.liveAdded)delete g.liveAdded[config.account];persist();nglNote('Remover tudo da Steam: '+ids.length+' atalho(s).');return send({removed:ids.length});}
+    if(route==='/api/storage'){const u=housekeeping.usage();return send({total:u.total,art:u.parts.art||0,cache:u.parts.cache||0,backups:u.parts.backups||0,updates:u.parts.updates||0});}
+    if(route==='/api/storage-clean'){const before=housekeeping.usage().total;await housekeeping.run();config.cleanAt=Date.now();saveConfig();const after=housekeeping.usage().total;return send({freed:Math.max(0,before-after),total:after});}
     if(route==='/api/update-check'){if(!updateRepo)return send({enabled:false,version:VERSION});await checkUpdate();return send({enabled:true,version:VERSION,available:update.available?{version:update.available.version,notes:update.available.notes,page:update.available.page}:null,error:update.error});}
     if(route==='/api/update-apply'){if(!update.available)throw Error('Nenhuma atualização disponível.');if(process.platform!=='win32'||!onApplyUpdate)throw Error('A atualização automática só funciona no programa instalado no Windows.');if(update.downloading)throw Error('A atualização já está sendo baixada.');
      update.downloading=true;update.progress=0;try{const zip=await downloadRelease(update.available,path.join(dataDir,'updates'),{onProgress:(got,total)=>{update.progress=total?got/total:0;}});const script=path.join(dataDir,'updates','aplicar.ps1');atomic(script,Buffer.from('\uFEFF'+updateScript({zip,installDir:path.dirname(process.execPath),pid:process.pid}),'utf8'));nglNote('Aplicando atualização '+update.available.version);setTimeout(()=>onApplyUpdate(script),200);return send({ok:true});}finally{update.downloading=false;}}
@@ -660,7 +991,7 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
      const g=getGame(body.id),mode=String(body.provider||'auto');if(!['auto','local','retroachievements','rpcs3','vita3k','shadps4','port','epic','gog','xbox','steam','none'].includes(mode))throw Error('Fonte de conquistas inválida.');
      if(body.steamAppId&&!/^[1-9]\d{0,9}$/.test(String(body.steamAppId)))throw Error('Steam AppID inválido.');if(body.trophySet&&!/^NPWR\d+_\d+$/.test(body.trophySet))throw Error('Conjunto de troféus inválido.');
      const folder=typeof body.path==='string'?body.path.trim():'';if(folder&&!fs.existsSync(folder))throw Error('Pasta de conquistas não encontrada.');
-     g.achievementSettings={provider:mode,path:folder,steamAppId:body.steamAppId?Number(body.steamAppId):null,trophySet:body.trophySet||''};if(g.achievementSettings.steamAppId)g.metadataSteamAppId=g.achievementSettings.steamAppId;else delete g.metadataSteamAppId;persist();return send({message:'Fonte de conquistas salva.'});
+     g.achievementSettings={provider:mode,path:folder,steamAppId:body.steamAppId?Number(body.steamAppId):null,trophySet:body.trophySet||''};if(mode==='retroachievements')delete g.raLookupAt;if(g.achievementSettings.steamAppId)g.metadataSteamAppId=g.achievementSettings.steamAppId;else delete g.metadataSteamAppId;persist();return send({message:'Fonte de conquistas salva.'});
     }
     if(route==='/api/ra-login'){const user=String(body.user||'').trim(),password=String(body.password||'');if(!/^[A-Za-z0-9_.-]{2,32}$/.test(user)||!password)throw Error('Informe usuário e senha do RetroAchievements.');const r=await providers.retro.login(user,password);config.raUser=r.user;config.raToken=r.token;saveConfig();providers.retro.accountsCache=null;return send({message:'Conectado ao RetroAchievements como '+r.user+'.',ra:providers.retro.status()});}
     if(route==='/api/ra-logout'){delete config.raToken;saveConfig();providers.retro.accountsCache=null;return send({message:'Login do RetroAchievements removido do Taiga Launcher.',ra:providers.retro.status()});}
@@ -674,8 +1005,13 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
      const hadArtKeys=!!config.sgdbKey,hadIgdb=!!(config.igdbId&&config.igdbSecret);for(const key of ['sgdbKey','igdbId','igdbSecret','raKey','steamKey'])if(typeof body[key]==='string'&&body[key].trim())config[key]=body[key].trim();if(!hadArtKeys&&config.sgdbKey||!hadIgdb&&config.igdbId&&config.igdbSecret)setTimeout(()=>completeArtworkAfterKeys().catch(()=>{}),500);
      if(typeof body.steamDir==='string'){const ac=win.accounts(config.steamDir);if(!ac.some(a=>a.id===config.account))config.account=ac.find(a=>a.recent)?.id||ac[0]?.id||'';}
      if(Array.isArray(body.roots))config.roots=body.roots.filter(x=>typeof x==='string'&&x.trim());
-     if(body.preferences){for(const k of ['autoLookup','closeSteam','scanOnStart','autoCollection','watchFolders','autoDiscover','autoSync','discordPresence','startWithWindows'])if(typeof body.preferences[k]==='boolean')config.preferences[k]=body.preferences[k];if(typeof body.preferences.startWithWindows==='boolean')try{onStartupChange?.(body.preferences.startWithWindows);}catch{}if(['system','light','dark'].includes(body.preferences.theme))config.preferences.theme=body.preferences.theme;}
-     saveConfig();setWatchRoots();return send({message:'Configurações salvas.'});
+     const raBefore=!!config.preferences.retroarchFirst,libBefore=!!config.preferences.showUninstalled,colBefore=!!config.preferences.storeCollections+'|'+!!config.preferences.emuCollection;if(typeof body.retroarchAsked==='boolean'){config.retroarchAsked=body.retroarchAsked;}if(typeof body.setupDone==='boolean'){config.setupDone=body.setupDone;}if(typeof body.seenVersion==='string'&&/^\d+\.\d+\.\d+$/.test(body.seenVersion)){config.seenVersion=body.seenVersion;}if(body.supportHideUntil!==undefined){const n=Number(body.supportHideUntil);config.supportHideUntil=Number.isFinite(n)&&n>0?Math.min(n,Date.now()+400*864e5):0;}if(body.preferences){for(const k of ['autoLookup','closeSteam','scanOnStart','autoCollection','watchFolders','autoDiscover','autoSync','discordPresence','startWithWindows','showUninstalled','storeCollections','retroarchFirst','emuCollection'])if(typeof body.preferences[k]==='boolean')config.preferences[k]=body.preferences[k];if(['legendary','launcher'].includes(body.preferences.epicInstaller))config.preferences.epicInstaller=body.preferences.epicInstaller;if(typeof body.preferences.startWithWindows==='boolean')try{onStartupChange?.(body.preferences.startWithWindows);}catch{}if(['system','light','dark'].includes(body.preferences.theme))config.preferences.theme=body.preferences.theme;}
+     if(typeof body.epicInstallDir==='string'){const d=body.epicInstallDir.trim();if(d&&!path.isAbsolute(d))throw Error('Escolha uma pasta válida para instalar os jogos da Epic.');config.epicInstallDir=d;}
+     saveConfig();setWatchRoots();
+     if(raBefore!==!!config.preferences.retroarchFirst)reassignProfiles().catch(e=>nglNote('Emuladores: '+e.message));
+     if(libBefore!==!!config.preferences.showUninstalled)syncStoreLibrary().catch(e=>nglNote('Biblioteca das lojas: '+e.message));
+     if(colBefore!==!!config.preferences.storeCollections+'|'+!!config.preferences.emuCollection)applyStoreCollections().catch(e=>nglNote('Coleções das lojas: '+e.message));
+     return send({message:'Configurações salvas.'});
     }
     // Integração direta com a Steam (injetor próprio).
     if(route==='/api/shortcut-folder'){
@@ -684,8 +1020,8 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
      if(action==='disable'){config.shortcutFolder='';saveConfig();watchShortcutFolder();return send({folder:''});}
      if(action==='open'||action==='create'){if(process.platform==='win32'&&config.shortcutFolder)try{spawn(explorer(),[config.shortcutFolder],{detached:true,stdio:'ignore'}).unref();}catch{}}
      const result=await syncShortcutFolder();return send({folder:config.shortcutFolder||'',...result});}
-    if(route==='/api/epic-login'){if(!epicLogin)throw Error('O login da Epic só está disponível no aplicativo do Taiga Launcher.');const code=await epicLogin();if(!code)return send({cancelled:true});config.epicAuth=await exchangeCode(code);saveConfig();for(const g of db.games.filter(x=>!x.hidden&&!x.demo&&['pc','custom','store'].includes(x.profile)&&achievementManager.isEpicGame(x)))achievementManager.get(g,{live:true}).catch(()=>{});return send({message:'Conta Epic conectada'+(config.epicAuth.displayName?': '+config.epicAuth.displayName:'')+'.',name:config.epicAuth.displayName||''});}
-    if(route==='/api/xbox-login'){if(!xboxLogin)throw Error('O login da Microsoft só está disponível no aplicativo do Taiga Launcher.');const msa=await xboxLogin();if(!msa)return send({cancelled:true});const xsts=await xstsFromMsa(msa);config.xboxAuth={msa,xsts,gamertag:xsts.gamertag,xuid:xsts.xuid};saveConfig();for(const g of db.games.filter(x=>!x.hidden&&x.store?.name==='xbox'))achievementManager.get(g,{live:true}).catch(()=>{});return send({message:'Conta Xbox conectada'+(xsts.gamertag?': '+xsts.gamertag:'')+'.'});}
+    if(route==='/api/epic-login'){if(!epicLogin)throw Error('O login da Epic só está disponível no aplicativo do Taiga Launcher.');const code=await epicLogin();if(!code)return send({cancelled:true});config.epicAuth=await exchangeCode(code);saveConfig();for(const g of db.games.filter(x=>!x.hidden&&!x.demo&&['pc','custom','store'].includes(x.profile)&&achievementManager.isEpicGame(x)))achievementManager.get(g,{live:true}).catch(()=>{});if(config.preferences.showUninstalled)syncStoreLibrary().catch(()=>{});return send({message:'Conta Epic conectada'+(config.epicAuth.displayName?': '+config.epicAuth.displayName:'')+'.',name:config.epicAuth.displayName||''});}
+    if(route==='/api/xbox-login'){if(!xboxLogin)throw Error('O login da Microsoft só está disponível no aplicativo do Taiga Launcher.');const msa=await xboxLogin();if(!msa)return send({cancelled:true});const xsts=await xstsFromMsa(msa);config.xboxAuth={msa,xsts,gamertag:xsts.gamertag,xuid:xsts.xuid};saveConfig();for(const g of db.games.filter(x=>!x.hidden&&x.store?.name==='xbox'))achievementManager.get(g,{live:true}).catch(()=>{});if(config.preferences.showUninstalled)syncStoreLibrary().catch(()=>{});return send({message:'Conta Xbox conectada'+(xsts.gamertag?': '+xsts.gamertag:'')+'.'});}
     if(route==='/api/psn-login'){if(!psnLogin)throw Error('O login da PlayStation só está disponível no aplicativo do Taiga Launcher.');const npsso=await psnLogin();if(!npsso)return send({cancelled:true});const auth=await psnFromNpsso(npsso);const prof=await psnProfile(auth).catch(()=>({}));config.psnAuth={...auth,...prof};saveConfig();for(const g of db.games.filter(x=>!x.hidden&&['pc','custom'].includes(x.profile)))achievementManager.get(g,{quiet:true}).catch(()=>{});return send({message:'Conta PlayStation conectada.'});}
     if(route==='/api/psn-logout'){delete config.psnAuth;saveConfig();return send({message:'Conta PlayStation desconectada.'});}
     if(route==='/api/xbox-logout'){delete config.xboxAuth;saveConfig();return send({message:'Conta Xbox desconectada.'});}
@@ -696,7 +1032,7 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
     // Emulador oficial baixado e configurado sozinho (opcional).
     if(route==='/api/emulator-downloads')return send({items:(process.platform==='linux'?[]:downloadable()).map(d=>({...d,platform:PROFILES[d.profile]?.platform||'',configured:d.profile==='psp'?isFile(config.emulator)||isFile(config.launchers?.psp?.exe):isFile(config.launchers?.[d.profile]?.exe)}))});
     if(route==='/api/emulator-download'){if(process.platform==='linux')throw Error('Esta operação requer Windows.');const profile=String(body.profile||'');const home=process.env.USERPROFILE||os.homedir(),legacy=path.join(home,'TaigaSteam','Emuladores'),dest=fs.existsSync(legacy)?legacy:path.join(home,'Taiga Launcher','Emuladores');const r=await downloadEmulator(profile,{dest,tmpDir:path.join(dataDir,'downloads')});
-     if(r.manual){if(process.platform==='win32'){try{spawn('explorer.exe',['/select,',r.manual],{stdio:'ignore',detached:true}).unref();}catch{}}return send({message:'{0} {1} baixado. Extraia o arquivo {2} nessa pasta e use Procurar emuladores.'.replace('{0}',r.name).replace('{1}',r.version).replace('{2}',path.basename(r.manual)),folder:r.folder,manual:true,settings:configView()});}const found=await inventory('emulators',[r.folder]);discoveryResult=found;const applied=applyDiscovery(config,found);saveConfig();return send({message:r.name+' '+r.version+' instalado em '+r.folder+' e configurado.',folder:r.folder,applied,settings:configView()});}
+     if(r.manual){if(process.platform==='win32'){try{spawn('explorer.exe',['/select,',r.manual],{stdio:'ignore',detached:true}).unref();}catch{}}return send({message:'{0} {1} baixado. Extraia o arquivo {2} nessa pasta e use Procurar emuladores.'.replace('{0}',r.name).replace('{1}',r.version).replace('{2}',path.basename(r.manual)),folder:r.folder,manual:true,settings:configView()});}const found=await inventory('emulators',[r.folder]);discoveryResult=found;const applied=applyDiscovery(config,found,{force:true});saveConfig();clearRetroArchCache();const moved=await reassignProfiles();return send({moved:moved.changed,readyGames:moved.ready,message:r.name+' '+r.version+' instalado em '+r.folder+' e configurado.',folder:r.folder,applied,settings:configView()});}
     if(route==='/api/diagnostics'){const report=await diagnostics(),file=path.join(dataDir,'diagnostico-'+new Date().toISOString().replace(/[:.]/g,'-')+'.json');save(file,report);if(process.platform==='win32')try{spawn(explorer(),['/select,',file],{detached:true,stdio:'ignore'}).unref();}catch{}return send({file,report});}
     if(route==='/api/steam-integration/reload'){
      // Recarrega a interface da Steam (sem fechar a Steam): a página do jogo volta do zero com a versão atual.
@@ -722,6 +1058,7 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
       if(body.sweep!==false)try{const sw=await inventory('sweep',sweepRoots({skip:discovered.paths,...(body.sweep==='home'?{drives:[]}:{})}));sweepFiles=sw.files||[];}catch{}
       config.discoveredAt=new Date().toISOString();saveConfig();
      }
+     let pickedStores=null;if(!discovering&&Array.isArray(body.paths)&&body.paths.some(p=>/\.(lnk|url|exe)$/i.test(p))){const r=await resolvePicked(body.paths);body.paths=r.paths;pickedStores=r.stores;}
      if(discovering&&!body.paths.length&&!sweepFiles.length&&body.stores===false)return send({items:[],existing:[],skipped:0,errors:[],scanId:null,folders:[],sources:[]});
      const scanned=body.paths?.length||!discovering?await inventory('scan',body.paths||config.roots):{files:[],errors:[]},scanResult={files:[...new Set([...scanned.files,...sweepFiles])],errors:scanned.errors},errors=discovering?scanResult.errors.filter(e=>!/muito grande|ENOENT|EPERM|EACCES/i.test(e.message||e)):[...scanResult.errors];
      const sweptOnly=new Set(sweepFiles.filter(f=>!scanned.files.includes(f)).map(f=>windowsPath(f)));
@@ -733,6 +1070,7 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
      if(discovering)inspected.items=inspected.items.filter(i=>i.profile!=='pc'&&!/\.(exe|bat|cmd|lnk)$/i.test(i.path));
      // Busca de um emulador só (aba Emuladores): só os jogos que ele abre.
      if(body.profile&&REGISTRY_PROFILES[body.profile]){const pf=REGISTRY_PROFILES[body.profile],plats=pf.platforms||[pf.platform];inspected.items=inspected.items.filter(i=>i.profile===body.profile||plats.includes(i.platformName));}
+     if(pickedStores?.length)inspected.items=inspected.items.map(i=>{const lp=String(i.path).toLowerCase(),st=pickedStores.find(x=>x.path.toLowerCase()===lp)||pickedStores.find(x=>x.store==='xbox'&&x.root&&lp.startsWith(String(x.root).toLowerCase().replace(/[\\/]+$/,'')+path.sep));return st?storeInfo(i,st):i;});
      const result=reconcile(db.games,inspected.items);if(inspected.items.some(g=>!['pc','custom'].includes(g.profile)&&!isFile(config.launchers?.[g.profile]?.exe)&&!(g.profile==='psp'&&isFile(config.emulator)))){const roots=[...(config.roots||[]),...(body.paths||[]).map(p=>isFile(p)?path.dirname(p):p)];discoveryResult=await inventory('emulators',defaultDiscoveryRoots({...config,roots},{appRoot:launcherExecutable?path.dirname(launcherExecutable):ROOT}));applyDiscovery(config,discoveryResult);saveConfig();}
      if(result.moved.length||result.changedIds.length)persist();
      const existing=scanResult.files.map(file=>db.games.find(g=>!g.demo&&windowsPath(g.path)===windowsPath(file))).filter(Boolean).map(g=>({id:g.id,title:g.title,path:g.path,hidden:!!g.hidden}));
@@ -784,7 +1122,7 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
     if(route==='/api/import-confirm'){
      const session=importSessions.get(body.scanId);if(!session||Date.now()-session.at>3600000)throw Error('A revisão expirou. Selecione os arquivos novamente.');
      if(!Array.isArray(body.items)||!body.items.length||body.items.length>500)throw Error('Selecione entre 1 e 500 jogos.');
-     for(const item of body.items){if(typeof item.path!=='string'||!session.paths.has(windowsPath(path.resolve(item.path))))throw Error('Revise os arquivos encontrados antes de adicionar.');if(!PROFILES[item.profile])throw Error('Escolha um perfil válido.');const scanned=session.items.find(g=>windowsPath(g.path)===windowsPath(path.resolve(item.path))),stat=fs.statSync(item.path);if(!scanned||scanned.bytes!==stat.size||scanned.mtime!==stat.mtimeMs)throw Error('O arquivo mudou durante a identificação. Selecione-o novamente.');if(item.choice){const choice=externalChoices.get(item.choice);if(!choice||Date.now()-choice.at>3600000)throw Error('A identificação expirou. Pesquise novamente.');}}
+     for(const item of body.items){if(typeof item.path!=='string'||!session.paths.has(windowsPath(path.resolve(item.path))))throw Error('Revise os arquivos encontrados antes de adicionar.');if(!PROFILES[item.profile])throw Error('Escolha um perfil válido.');const scanned=session.items.find(g=>windowsPath(g.path)===windowsPath(path.resolve(item.path))),stat=(()=>{try{return fs.statSync(item.path);}catch(e){if(scanned&&/\.exe$/i.test(item.path)&&/^(EPERM|EACCES)$/.test(String(e?.code||'')))return {size:scanned.bytes,mtimeMs:scanned.mtime};throw e;}})();if(!scanned||scanned.bytes!==stat.size||scanned.mtime!==stat.mtimeMs)throw Error('O arquivo mudou durante a identificação. Selecione-o novamente.');if(item.choice){const choice=externalChoices.get(item.choice);if(!choice||Date.now()-choice.at>3600000)throw Error('A identificação expirou. Pesquise novamente.');}}
      const result=await addFiles(body.items.map(i=>i.path));
      for(const id of result.addedIds){const g=getGame(id),item=body.items.find(i=>windowsPath(path.resolve(i.path))===windowsPath(g.path));if(!item)continue;
       if(typeof item.title==='string'&&item.title.trim())g.title=item.title.trim().slice(0,200);g.profile=item.profile;g.needsReview=g.profile==='custom';g.platformName=String(item.platformName||PROFILES[item.profile].platform).slice(0,150);
@@ -880,7 +1218,9 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
  const liveTimer=setInterval(async()=>{if(closed||liveBusy)return;liveBusy=true;try{for(const g of db.games){if(g.hidden||g.demo||!g.uuid)continue;let running=false;try{running=!!sessions.forGame(g.uuid,config.account)?.running;}catch{}if(running){try{await achievementManager.get(g,{live:true});}catch{}continue;}const f=achievementManager.cached(g)?.progressFile;if(!f)continue;let m;try{m=fs.statSync(f).mtimeMs;}catch{continue;}const old=progressMarks.get(g.id);progressMarks.set(g.id,m);if(old!==undefined&&old!==m)try{await achievementManager.get(g);}catch{}}}finally{liveBusy=false;}},8000);liveTimer.unref?.();
  const raLog=new RALogWatcher({files:()=>raLogCandidates(config),onEvent:e=>{if(e.type!=='award'&&e.type!=='start')return;const g=db.games.find(x=>x.raId&&Number(x.raId)===Number(e.gameId)&&!x.hidden);if(!g)return;setTimeout(()=>achievementManager.get(g,{live:e.type==='award'?1:true}).catch(()=>{}),e.type==='award'?1500:0);}});
  // Troféus de ports nativos (SpartanPort e parecidos): o desbloqueio aparece no log do port e é guardado aqui.
- const portLog=new PortLogWatcher({games:()=>db.games.filter(g=>!g.demo&&!g.hidden&&['pc','custom'].includes(g.profile)&&(g.achievementSettings?.provider||'auto')!=='none').flatMap(g=>{const port=portOf(g);return port?portLogFiles(g.path).map(file=>({game:g,file})):[];}),
+ // Lista de arquivos de cada port guardada por 20 s (o ciclo de 1,5 s só lê o tamanho dos arquivos).
+ const portFilesCache=new Map();
+ const portLog=new PortLogWatcher({games:()=>db.games.filter(g=>!g.demo&&!g.hidden&&['pc','custom'].includes(g.profile)&&(g.achievementSettings?.provider||'auto')!=='none').flatMap(g=>{const port=portOf(g);if(!port)return [];const k=g.path+'|'+g.uuid,hit=portFilesCache.get(k);if(hit&&Date.now()-hit.at<20000)return hit.files.map(file=>({game:g,file}));const files=portLogFiles(g.path,{extra:g.uuid?[portCaptureFile(dataDir,g.uuid)]:[]});portFilesCache.set(k,{at:Date.now(),files});return files.map(file=>({game:g,file}));}),
   onUnlock:(g,id,{live})=>{(async()=>{const store=achievementManager.portStore;if(store.get(g.uuid||g.id).unlocked[String(id)])return;if(live)await achievementManager.get(g,{quiet:true}).catch(()=>{});if(!store.record(g.uuid||g.id,id))return;nglNote('Troféu '+id+' de '+g.title+(live?' desbloqueado agora.':' encontrado no log da última sessão.'));await achievementManager.get(g,live?{live:1}:{quiet:true}).catch(()=>{});})().catch(()=>{});}});
  if(startInjector){raLog.start();portLog.start();}
  // Integração sempre ligada, como no Millennium: o marcador .cef-enable-remote-debugging faz a Steam abrir a porta
@@ -897,7 +1237,7 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
   fs.copyFileSync(target,target+'.backup-'+Date.now());atomic(target,restore??'// Taiga Launcher: a página dos jogos agora é colocada pelo próprio Taiga Launcher (sem SFP).\n');nglNote('Script antigo do SFP retirado de '+target);return true;}catch(e){nglNote('Script do SFP: '+e.message);return false;}}
  retireSfpScript();
  // Steam aberta sem a porta: avisa uma vez (ou reinicia sozinha se o usuário pediu), como o "Force Steam arguments" do SFP.
- async function checkIntegration(){if(closed||integration.checking||config.injectSteam===false||!config.steamDir||!startInjector)return;integration.checking=true;try{const st=injector.status();if(st.connected&&st.windows.length){integration.needsRestart=false;integration.since=0;return;}const up=await win.running().catch(()=>false);if(!up){integration.needsRestart=false;integration.since=0;return;}
+ async function checkIntegration(){if(closed||integration.checking||config.injectSteam===false||!config.steamDir||!startInjector)return;integration.checking=true;try{const st=injector.status();if(st.connected&&st.windows.length){integration.needsRestart=false;integration.since=0;return;}if(integration.downAt&&Date.now()-integration.downAt<15000)return;const up=await win.running().catch(()=>false);if(!up){integration.downAt=Date.now();integration.needsRestart=false;integration.since=0;return;}integration.downAt=0;
    if(!integration.since){integration.since=Date.now();return;}if(Date.now()-integration.since<15000)return;integration.needsRestart=true;
    const ownRunning=db.games.some(g=>!g.demo&&g.uuid&&sessions.forGame(g.uuid,config.account)?.running);
    if(config.autoRestartSteam===true&&!ownRunning&&!integration.restarting){integration.restarting=true;try{nglNote('Steam sem integração: reiniciando automaticamente.');await win.stopSteam(config.steamDir);ensureCefMarker();win.startSteam(config.steamDir,Number(config.steamDebugPort)||DEFAULT_DEBUG_PORT);integration.since=0;integration.needsRestart=false;}catch(e){nglNote('Reinício automático falhou: '+e.message);}finally{integration.restarting=false;}return;}
@@ -905,7 +1245,7 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
   }finally{integration.checking=false;}}
  const integrationTimer=setInterval(()=>{checkIntegration().catch(()=>{});},5000);integrationTimer.unref?.();
  // Diagnóstico para suporte: estado da integração, registros e configuração sem senhas/chaves.
- async function diagnostics(){const redact=v=>v?'(definido)':'';const c={...config};if(c.xboxAuth)c.xboxAuth={connected:true,gamertag:c.xboxAuth.gamertag};for(const k of ['ps4TrophyKey','sgdbKey','igdbSecret','igdbId','own_sgdbKey','own_igdbSecret','own_igdbId','raKey','steamKey','adminToken','readToken','raToken','raPassword','profileKey'])if(k in c)c[k]=redact(c[k]);if(c.epicAuth)c.epicAuth={connected:true,accountId:c.epicAuth.accountId};
+ async function diagnostics(){const redact=v=>v?'(definido)':'';const c={...config};if(c.xboxAuth)c.xboxAuth={connected:true,gamertag:c.xboxAuth.gamertag};for(const k of ['ps4TrophyKey','sgdbKey','igdbSecret','igdbId','own_sgdbKey','own_igdbSecret','own_igdbId','raKey','steamKey','adminToken','readToken','raToken','raPassword','profileKey'])if(k in c)c[k]=redact(c[k]);if(c.epicAuth)c.epicAuth={connected:true,accountId:c.epicAuth.accountId};if(c.psnAuth)c.psnAuth={connected:true};if(c.commentsAuth)c.commentsAuth={connected:true,steamid:c.commentsAuth.steamid};
   const up=await win.running().catch(()=>null),cmd=up?await win.steamCommandLine().catch(()=>null):null;let shared=null;try{shared=await injector?.evaluateShared('JSON.stringify({ngl:window.__TAIGA_NGL_STATE__||null,error:window.__TAIGA_NGL_ERROR__||null,host:!!window.__TAIGA_NGL_HOST__,missing:window.__TAIGA_NGL_MISSING__||null,globals:{react:typeof window.SP_REACT,reactDom:typeof window.SP_REACTDOM,webpack:Object.keys(window).filter(k=>/^webpackChunk/.test(k)),appStore:typeof window.appStore,popup:typeof window.g_PopupManager,client:typeof window.SteamClient},ui:typeof window.SteamUIStore,popups:(()=>{try{return Array.from(window.g_PopupManager.GetPopups()).map(p=>p.m_strName||p.name||"").slice(0,20)}catch(e){return null}})()})');}catch{}
   return {generated:new Date().toISOString(),version:VERSION,platform:process.platform+' '+os.release(),node:process.version,config:c,steam:{running:up,commandLine:cmd,marker:cefMarker()?fs.existsSync(cefMarker()):false,debugPortReachable:injector?.status().connected||false},injector:injector?.status()||null,integration:{...integration},shared:(()=>{try{return JSON.parse(shared||'null');}catch{return shared;}})(),games:{total:db.games.filter(g=>!g.demo).length,bound:db.games.filter(g=>g.bindings?.[config.account]).length},nglMappings:Object.keys(nglBackend.allMappings()).length,log:nglLog.slice(-300)};}
  // Conquistas da Epic: a conta é capturada sozinha quando a Epic abre um jogo (-epicuserid) e o progresso é relido
@@ -953,8 +1293,10 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
    return {community:communityScript,shared:'(function(){var want='+JSON.stringify(digest(bundle).slice(0,16))+';try{if(window.__TAIGA_NGL_PLUGIN__&&window.__TAIGA_NGL_VERSION__!==want){var k=\'taigaNglRestart\',last=Number(localStorage.getItem(k)||0);if(Date.now()-last>120000){localStorage.setItem(k,String(Date.now()));try{window.__taiga_ffi__&&window.__taiga_ffi__(JSON.stringify({id:0,method:\'fe_log\',args:{msg:\'Taiga Launcher atualizado: recarregando a interface da Steam para usar a página nova.\'}}));}catch(e){}if(window.SteamClient&&SteamClient.Browser&&typeof SteamClient.Browser.RestartJSContext===\'function\')SteamClient.Browser.RestartJSContext();else location.reload();}}}catch(e){}window.__TAIGA_NGL_WANT__=want;})();\n'+'window.__TAIGA_CATALOG__='+JSON.stringify(nglCatalog())+';\n'+fs.readFileSync(path.join(ROOT,'steam/ngl-host.js'),'utf8')+'\n'+nglLoader(bundle,fs.readFileSync(path.join(ROOT,'steam/ngl-boot.js'),'utf8'))+'\n'+notify};},
   onCall:async(method,args,kind)=>{
    // Página da Comunidade (site): só os três pedidos de leitura dela.
-   if(kind==='community'){if(method==='community_games')return JSON.stringify(await profilePages.games());if(method==='community_image')return JSON.stringify(await profilePages.image(args));if(method==='community_achievements')return JSON.stringify(await profilePages.achievements(args));if(method==='community_friend')return JSON.stringify(await publicProfile.friend(args.steamId));throw Error('Não permitido.');}
+   if(kind==='community'||kind==='web'){if(method==='community_games')return JSON.stringify(await profilePages.games());if(method==='community_image')return JSON.stringify(await profilePages.image(args));if(method==='community_achievements')return JSON.stringify(await profilePages.achievements(args));if(method==='community_friend')return JSON.stringify(await publicProfile.friend(args.steamId));throw Error('Não permitido.');}
    if(kind!=='shared')throw Error('Não permitido.');
+   if(method.startsWith('taiga_comments_'))return encodeCallResult(await commentsCall(method,args));
+   if(method==='taiga_game_extras')return encodeCallResult(await extrasCall(args));
    if(method==='taiga_artwork_changed')return encodeCallResult(adoptSteamArtwork(args.shortcut_app_id,{pin:args.user===true}));return encodeCallResult(await nglBackend.call(method,args));},
   health:{shared:"window.__TAIGA_NGL_STATE__!=='error'&&window.__TAIGA_NGL_STATE__!=='missing'"},refreshExpression:async()=>`window.__TAIGA_SET_CATALOG__&&window.__TAIGA_SET_CATALOG__(${JSON.stringify(nglCatalog())});window.__TAIGA_NGL_REFRESH__&&window.__TAIGA_NGL_REFRESH__();true`,...injectorOptions});
  if(startInjector)injector.start();
@@ -967,7 +1309,11 @@ const artMissing=g=>ART_KINDS.filter(k=>!g.art?.[k]&&!g.artPinned?.[k]);
 const coverDue=g=>{if(pendingFinish.has(g.id)||g.demo||g.hidden||g.native)return false;const miss=artMissing(g);if(!miss.length)return false;if(!g.coverCheckedAt)return true;if(providers.sgAvailable?.()&&g.artTriedApi===false)return true;return Date.now()-g.coverCheckedAt>=COVER_WAIT[Math.min(g.coverTries||0,COVER_WAIT.length-1)];};
 // Ícone de jogo de PC sem ícone em nenhum banco: logo do pacote (Xbox/Microsoft Store) ou o ícone do .exe.
 async function localIcon(g){const exe=g.launch?.exe&&/\.exe$/i.test(g.launch.exe)&&!/explorer\.exe$/i.test(g.launch.exe)&&g.profile!=='store'?g.launch.exe:g.path;if(!exe||!/\.exe$/i.test(exe)||!isFile(exe))return;const src=iconSourceFor(exe,g.gameRoot||'');let bytes=null;if(src.png){const b=fs.readFileSync(src.png);if(b.length<4*1024*1024&&imageType(b)==='png')bytes=b;}if(!bytes&&fileIcon&&(src.exe!==exe||!src.png))bytes=await fileIcon(src.exe||exe);if(!bytes?.length||imageType(bytes)!=='png')return;const name=digest(bytes)+'.png';atomic(path.join(dataDir,'art',name),bytes);g.art={...(g.art||{}),icon:name};g.artSources={...(g.artSources||{}),icon:src.png?'pacote':'executável'};}
-async function coverSweep(){if(closed||providers.offline)return;if(coverBusy){coverAgain=true;return;}coverBusy=true;let found=0;try{do{coverAgain=false;for(const g of db.games.filter(coverDue).slice(0,40)){if(closed)break;const before=artMissing(g).length;g.coverCheckedAt=Date.now();g.coverTries=(g.coverTries||0)+1;g.artTriedApi=!!providers.sgAvailable?.();try{const appId=steamAppIdFor(g);if(appId&&artMissing(g).some(k=>k!=='icon'))await steamLink.apply(g,appId).catch(()=>{});if(!g.sgdbId&&providers.resolveSgdbId&&g.artTriedApi)await providers.resolveSgdbId(g,{steamAppId:appId}).catch(()=>{});if(g.sgdbId&&artMissing(g).length)await providers.enrich(g,{sgdb:{id:g.sgdbId},missingOnly:true}).catch(()=>{});if(!g.art?.cover&&providers.findCover)await providers.findCover(g);if(artMissing(g).some(k=>k!=='icon')&&providers.freeArt)await providers.freeArt(g).catch(()=>{});if(!g.art?.icon&&!g.artPinned?.icon&&['pc','store','custom'].includes(g.profile))await localIcon(g).catch(()=>{});const after=artMissing(g).length;if(after<before)found++;if(!after||g.art?.cover&&after<before)delete g.coverTries;}catch{}persist();}}while(coverAgain&&!closed);}finally{coverBusy=false;}if(found){try{injector?.reload?.()?.catch?.(()=>{});}catch{}setTimeout(()=>refreshSteamLive(),5000).unref?.();}}
+async function coverSweep(){if(closed||providers.offline)return;if(coverBusy){coverAgain=true;return;}coverBusy=true;let found=0,done=0;try{
+  {const quick=db.games.filter(g=>!g.hidden&&!g.demo&&g.storeImages&&artMissing(g).some(k=>g.storeImages[k==='hero'?'wide':k]));if(quick.length){let n=0;await pool(quick,8,async g=>{if(await quickStoreArt(g)){found++;if(++n%20===0)persist();}});persist();}}
+  do{coverAgain=false;{const list=db.games.filter(coverDue).slice(0,40);let next=0;await Promise.all(Array.from({length:Math.min(3,list.length)},async()=>{while(next<list.length&&!closed){const g=list[next++];done++;const before=artMissing(g).length;g.coverCheckedAt=Date.now();g.coverTries=(g.coverTries||0)+1;g.artTriedApi=!!providers.sgAvailable?.();try{const appId=steamAppIdFor(g);if(appId&&artMissing(g).some(k=>k!=='icon'))await steamLink.apply(g,appId).catch(()=>{});if(!g.sgdbId&&providers.resolveSgdbId&&g.artTriedApi)await providers.resolveSgdbId(g,{steamAppId:appId}).catch(()=>{});if(g.sgdbId&&artMissing(g).length)await providers.enrich(g,{sgdb:{id:g.sgdbId},missingOnly:true}).catch(()=>{});if(!g.art?.cover&&providers.findCover)await providers.findCover(g);if(artMissing(g).some(k=>k!=='icon')&&providers.freeArt)await providers.freeArt(g).catch(()=>{});if(!g.art?.icon&&!g.artPinned?.icon&&['pc','store','custom'].includes(g.profile))await localIcon(g).catch(()=>{});const after=artMissing(g).length;if(after<before)found++;if(!after||g.art?.cover&&after<before)delete g.coverTries;}catch{}if(done%5===0)persist();}}));}persist();
+  // Coleção grande recém-adicionada (primeiro uso): continua até todos terem passado, sem esperar o próximo ciclo.
+  if(!coverAgain&&done<600&&!closed&&db.games.some(coverDue))coverAgain=true;}while(coverAgain&&!closed);}finally{coverBusy=false;}if(found){try{injector?.reload?.()?.catch?.(()=>{});}catch{}setTimeout(()=>refreshSteamLive(),5000).unref?.();}}
 function coverSoon(){if(!startInjector)return;const t=setTimeout(()=>coverSweep().catch(()=>{}),4000);t.unref?.();}
 if(startInjector){setTimeout(()=>coverSweep().catch(()=>{}),15000).unref?.();const ct=setInterval(()=>coverSweep().catch(()=>{}),15*60000);ct.unref?.();server.on('close',()=>clearInterval(ct));}
  // Tempo de jogo de outros programas (Epic, GOG Galaxy, Playnite).
@@ -980,11 +1326,30 @@ if(startInjector){setTimeout(()=>coverSweep().catch(()=>{}),15000).unref?.();con
  const updateRepo=(()=>{try{return String(JSON.parse(fs.readFileSync(path.join(ROOT,'package.json'),'utf8')).taigaUpdates||'');}catch{return '';}})();
  const update={available:null,checkedAt:0,downloading:false,progress:0,error:''};
  async function checkUpdate(){if(process.platform==='linux'||!updateRepo||process.env.TAIGA_OFFLINE)return update;try{const rel=await latestRelease(updateRepo);update.checkedAt=Date.now();update.error='';update.available=rel&&newer(rel.version,VERSION)?rel:null;if(update.available)nglNote('Atualização disponível: '+rel.version);}catch(e){update.error=e.message;}return update;}
- if(startInjector&&updateRepo){setTimeout(()=>checkUpdate(),60000).unref?.();const ut=setInterval(()=>checkUpdate(),6*3600000);ut.unref?.();server.on('close',()=>clearInterval(ut));}
+ // Faxina da pasta de dados (atualizações já instaladas, backups velhos, imagens que ninguém usa): uma vez por dia,
+ // 90 s depois de abrir, em segundo plano.
+ const housekeeping=createHousekeeping({dataDir,version:VERSION,games:()=>db.games,extraRefs:()=>{const out=[];for(const m of [matches,externalChoices,artChoices])try{out.push(JSON.stringify([...m.values()]));}catch{}return out;},log:m=>nglNote(m)});
+ if(startInjector){setTimeout(()=>{if(closed||Date.now()-(Number(config.cleanAt)||0)<20*3600000)return;housekeeping.run().then(()=>{config.cleanAt=Date.now();saveConfig();}).catch(()=>{});},90000).unref?.();}
+ // Links de apoio (Ko-fi, GitHub Sponsors) vindos do servidor: no máximo uma vez a cada 12 horas, só https dos sites certos.
+ async function refreshSupportLinks(){const srv=providers.server?.();if(!srv||process.env.TAIGA_OFFLINE||Date.now()-(Number(config.supportLinksAt)||0)<12*3600000)return;try{const r=await fetch(srv+'/v1/links',{signal:AbortSignal.timeout(6000)});if(!r.ok)return;const j=await r.json(),ok=(u,host)=>{try{const x=new URL(String(u||''));return x.protocol==='https:'&&(x.hostname===host||x.hostname==='www.'+host)?x.href:'';}catch{return '';}};config.supportLinks={kofi:ok(j.kofi,'ko-fi.com'),sponsors:ok(j.sponsors,'github.com')};config.supportLinksAt=Date.now();saveConfig();}catch{}}
+ if(startInjector){setTimeout(()=>refreshSupportLinks(),5000).unref?.();}
+ if(startInjector&&updateRepo){setTimeout(()=>checkUpdate(),4000).unref?.();const ut=setInterval(()=>checkUpdate(),6*3600000);ut.unref?.();server.on('close',()=>clearInterval(ut));}
  // Capa, dados ou nome que mudaram depois de o jogo ir para a Steam: com a Steam aberta e a integração ativa,
  // atualiza sozinho (sem reiniciar). Sem a integração, continua a bolinha de pendência.
- let refreshing=false;async function refreshSteamLive(){if(refreshing||closed||config.preferences?.autoSync===false||!config.steamDir)return;refreshing=true;try{if(!(await win.running().catch(()=>false))||!(await liveReady()))return;const ids=db.games.filter(g=>!g.demo&&!g.hidden&&g.bindings?.[config.account]&&g.applied?.[config.account]!==signature(g)&&launchReadyFor(g)&&!sessions.forGame(g.uuid,config.account)?.running).map(g=>g.id).slice(0,20);if(ids.length){await sync(ids,{restart:false});nglNote('Atualizado na Steam sem reiniciar: '+ids.length+' jogo(s).');}}catch(e){nglNote('Atualização automática na Steam: '+e.message);}finally{refreshing=false;}}
+ // Atalhos do Taiga Launcher na Steam que perderam a ligação com o jogo (Steam recriou o atalho com outro número):
+ // religa pelo "--taiga-launch <uuid>" do próprio atalho. Sem isso, a página do jogo volta a ser a simples da Steam.
+ function relinkShortcuts(){if(!config.steamDir||!config.account)return 0;let list=[];try{list=nglBackend.shortcutsList();}catch{return 0;}let n=0;list=list.filter(s=>s.source==='shortcuts_vdf');const present=new Set(list.map(s=>Number(s.shortcut_app_id)>>>0));
+  for(const s of list){const m=String(s.launch_options||'').match(/--taiga-launch\s+"?([0-9a-f-]{36})"?/i);if(!m)continue;const sid=Number(s.shortcut_app_id)>>>0;if(!sid||shortcutGame(sid))continue;
+   const g=db.games.find(x=>!x.demo&&String(x.uuid||'').toLowerCase()===m[1].toLowerCase());if(!g)continue;const cur=Number(g.bindings?.[config.account])>>>0;if(cur&&present.has(cur)||Date.now()-Number(g.liveAdded?.[config.account]||0)<600000)continue;g.bindings={...(g.bindings||{}),[config.account]:sid};g.hidden=false;if(g.steamRemoved)delete g.steamRemoved[config.account];n++;}
+  if(n){persist();nglNote('Atalhos da Steam religados aos jogos: '+n+'.');injector?.reload?.().catch?.(()=>{});}return n;}
+ let refreshing=false;async function refreshSteamLive(){if(refreshing||closed||config.preferences?.autoSync===false||!config.steamDir)return;refreshing=true;try{try{relinkShortcuts();}catch{}if(!(injector?.status?.().connected||await win.running().catch(()=>false))||!(await liveReady()))return;const ids=db.games.filter(g=>!g.demo&&!g.hidden&&g.bindings?.[config.account]&&g.applied?.[config.account]!==signature(g)&&launchReadyFor(g)&&!sessions.forGame(g.uuid,config.account)?.running).map(g=>g.id).slice(0,20);if(ids.length){await sync(ids,{restart:false});nglNote('Atualizado na Steam sem reiniciar: '+ids.length+' jogo(s).');}}catch(e){nglNote('Atualização automática na Steam: '+e.message);}finally{refreshing=false;}}
+ if(startInjector){const ra=setTimeout(()=>{try{relinkShortcuts();}catch{}if((config.preferences.storeCollections||config.preferences.emuCollection)&&config.collectionsAppliedVersion!==VERSION)applyStoreCollections().then(r=>{if(r?.ok){config.collectionsAppliedVersion=VERSION;saveConfig();}}).catch(()=>{});reassignProfiles({startup:true}).catch(e=>nglNote('Emuladores: '+e.message));},45000);ra.unref?.();server.on('close',()=>clearTimeout(ra));}
  if(startInjector){const rt=setInterval(()=>refreshSteamLive(),120000);rt.unref?.();server.on('close',()=>clearInterval(rt));}
+ // 2.5.4: jogos de loja ainda sem a página da Steam tentam de novo, uma vez, com as regras novas (nome sem o sufixo
+ // de edição, Wikidata pelo nome). Em segundo plano, um por vez.
+ if(startInjector)setTimeout(async()=>{const todo=db.games.filter(g=>!g.demo&&!g.hidden&&g.store&&!steamAppIdFor(g)&&!g.steamLinkDisabled&&!g.storeLinkRetry254);for(const g of todo){if(closed)return;g.storeLinkRetry254=true;delete g.storeSteamCheckedAt;delete g.steamNameCheckedAt;delete g.steamResolve;try{await autoSteamLink(g);}catch{}}if(todo.length){persist();refreshSteamLive?.().catch?.(()=>{});}},90000).unref?.();
+ // Biblioteca das lojas (jogos não instalados): ao abrir e a cada 6 h; também confere jogos instalados por fora.
+ if(startInjector){const lib=()=>{if(config.preferences.showUninstalled||notInstalledGames().length)syncStoreLibrary().catch(e=>nglNote('Biblioteca das lojas: '+e.message));};setTimeout(lib,70000).unref?.();const lt=setInterval(lib,6*3600000);lt.unref?.();server.on('close',()=>{clearInterval(lt);for(const a of legendary.active())legendary.cancel(a).catch(()=>{});});}
  // Descrições que ficaram em outro idioma (tradução indisponível na hora da importação): tenta de novo.
  // Tradução que ficou para depois (cota, sem internet): tenta de novo ao abrir e a cada 2 horas, descrições e conquistas,
  // até tudo estar no idioma do programa. Nada fica em inglês para sempre.

@@ -1,5 +1,5 @@
 import { backendLog } from '../api/backend';
-import { findMappingForTitle, mappings, shortcutMappingKey } from '../core/mappings';
+import { findMappingForTitle, getMappingsRevision, isMappingSnapshotVerified, mappings, shortcutMappingKey } from '../core/mappings';
 import { normalizeTitle } from '../core/text';
 
 export const SHORTCUT_THRESHOLD = 2147483648;
@@ -388,8 +388,25 @@ export async function getShortcutPlaytimeMinutes(shortcutAppId: number): Promise
 	return retryable;
 }
 
+// Lista de atalhos ligados: percorrer todos os apps da Steam (milhares) a cada chamada pesava com bibliotecas grandes,
+// porque vários recursos pedem a lista seguidas vezes. Guardada por 1 s e refeita na hora se os vínculos mudarem.
+const mappedShortcutsCache = new WeakMap<object, { at: number; revision: number; verified: boolean; size: number; value: Array<{ id: number; title: string; steamAppId: string }> }>();
+const mappedShortcutsNoStore = {};
+function appStoreSize(appStore: any): number {
+	try { return Number(appStore?.m_mapApps?.size ?? 0) + Number(appStore?.allApps?.length ?? 0); } catch { return 0; }
+}
 export function getMappedShortcuts(doc?: Document): Array<{ id: number; title: string; steamAppId: string }> {
 	const appStore = getSteamAppStore(doc);
+	const cacheKey = (appStore && typeof appStore === 'object') ? appStore : mappedShortcutsNoStore;
+	const revision = getMappingsRevision(), verified = isMappingSnapshotVerified(), size = appStoreSize(appStore);
+	const hit = mappedShortcutsCache.get(cacheKey);
+	if (hit && hit.revision === revision && hit.verified === verified && hit.size === size && Date.now() - hit.at < 1000) return hit.value.map(item => ({ ...item }));
+	const computed = computeMappedShortcuts(doc, appStore);
+	mappedShortcutsCache.set(cacheKey, { at: Date.now(), revision, verified, size, value: computed });
+	return computed.map(item => ({ ...item }));
+}
+
+function computeMappedShortcuts(doc: Document | undefined, appStore: any): Array<{ id: number; title: string; steamAppId: string }> {
 	const result: Array<{ id: number; title: string; steamAppId: string }> = [];
 	const seen = new Set<number>();
 	const entries: Array<[unknown, any]> = [];

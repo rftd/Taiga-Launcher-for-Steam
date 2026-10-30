@@ -1,6 +1,6 @@
 // Logins e chaves guardados no config.json protegidos pelo Windows (DPAPI, via safeStorage do Electron): só o mesmo
 // usuário do Windows, neste PC, consegue ler. Sem o Electron (testes, servidor avulso) os valores ficam como estão.
-export const SECRET_FIELDS = ['epicAuth', 'xboxAuth', 'psnAuth', 'raToken', 'raKey', 'raPassword', 'steamKey', 'own_sgdbKey', 'own_igdbId', 'own_igdbSecret', 'ps4TrophyKey', 'profileKey'];
+export const SECRET_FIELDS = ['epicAuth', 'xboxAuth', 'psnAuth', 'raToken', 'raKey', 'raPassword', 'steamKey', 'own_sgdbKey', 'own_igdbId', 'own_igdbSecret', 'ps4TrophyKey', 'profileKey', 'commentsAuth'];
 const PREFIX = 'enc:v1:';
 
 export function openSecrets(config, box) {

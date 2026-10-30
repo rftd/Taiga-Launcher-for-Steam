@@ -1,3 +1,5 @@
+import {portProfile,nearPortExe} from './port-profiles.mjs';
+const DISC_PORT_EXT=new Set(['iso','cso','chd','bin','cue','img','gcm','rvz','wbfs','pbp']);
 import fs from 'node:fs';
 import path from 'node:path';
 import {flatpakLaunch} from './flatpak-emulators.mjs';
@@ -20,10 +22,28 @@ const ARCHIVE_EXT=['zip','7z'];
 // Perfil inicial da plataforma: o primeiro emulador listado no catálogo que existe no registro.
 export function profileForPlatform(key){const p=platformByKey(key);for(const profile of p?.profiles||[])if(PROFILES[profile])return profile;return 'custom';}
 function applyPlatform(info,key,source){const p=platformByKey(key);if(!p)return;info.platformKey=p.key;info.platformName=p.name;info.platformSource=source;if(!info.profileLocked)info.profile=profileForPlatform(p.key);}
+// Jogo do Xbox / Microsoft Store: a pasta protegida não deixa ler o .exe (EPERM). Entra mesmo assim, com o nome da
+// pasta do jogo; ele abre pelo próprio Xbox (shell:AppsFolder), então ler o arquivo não é necessário.
+function restrictedExe(input){const file=path.resolve(input),parts=file.split(/[\\/]/),i=parts.findIndex(p=>/^content$/i.test(p)),folder=i>0?parts[i-1]:parts.at(-2)||'';const title=cleanPCTitle(folder)||folder||path.basename(file,'.exe');
+ let bytes=0,mtime=0;try{const st=fs.statSync(file);bytes=st.size;mtime=st.mtimeMs;}catch{}
+ return {id:digest(file.toLowerCase()).slice(0,20),path:file,title,bytes,sizeBasis:null,mtime,profile:'pc',profileLocked:true,platformName:PROFILES.pc.platform,platformKey:'pc',platformSource:'extension',discId:'',serial:'',internalTitle:null,identitySource:'pasta protegida',revision:null,fileTitle:title,region:[],languages:[],discNumber:null,needsReview:false,art:{},restricted:true};}
+// Como o Playnite: o .exe de um jogo do Xbox nunca é aberto. O Windows deixa ver que ele existe, mas nega a leitura
+// (EPERM em open); qualquer negação ao ler um .exe vira a entrada mínima do jogo protegido.
 export function inspectGame(input){
- const file=fs.realpathSync(input),st=fs.statSync(file),ext=path.extname(file).slice(1).toLowerCase(),base=path.basename(file),upper=base.toUpperCase();
+ const info=inspectGameRaw(input);
+ // Port conhecido (Tenkaichi3Decomp, Zelda64Recomp, Ship of Harkinian...): entra com o nome do jogo original.
+ try{const prof=info&&/\.exe$/i.test(info.path)?portProfile({path:info.path}):null;if(prof){info.title=prof.title;info.internalTitle=prof.title;info.identitySource='Port conhecido ('+prof.name+')';info.portProfile=prof.id;}}catch{}
+ return info;
+}
+function inspectGameRaw(input){
+ try{return inspectGameFile(input);}catch(e){if(/\.exe$/i.test(String(input))&&/^(EPERM|EACCES)$/.test(String(e?.code||'')))return restrictedExe(input);throw e;}
+}
+function inspectGameFile(input){
+ const denied=e=>/\.exe$/i.test(String(input))&&/^(EPERM|EACCES)$/.test(String(e?.code||''));
+ let file,st;try{file=fs.realpathSync(input);st=fs.statSync(file);}catch(e){if(denied(e))return restrictedExe(input);throw e;}
+ const ext=path.extname(file).slice(1).toLowerCase(),base=path.basename(file),upper=base.toUpperCase();
+ const archive=ARCHIVE_EXT.includes(ext);let folder=platformFromPath(file);if(!folder&&ext==='zip'){const zp=zipPlatform(file);if(zp)folder={platform:zp,folder:path.dirname(file),level:0};}
  const native=process.platform==='linux'&&nativeExecutable(file);
- const folder=platformFromPath(file),archive=ARCHIVE_EXT.includes(ext);
  if(!st.isFile()||!st.size||(!native&&!EXTENSIONS.includes(ext)&&upper!=='EBOOT.BIN'&&!(archive&&folder)))throw Error('Formato não suportado ou arquivo vazio.');
  const name=parseRomName(file);
  let pbpPS1=false;
@@ -36,7 +56,7 @@ export function inspectGame(input){
  else if(ext==='exe'){
   info.profile='pc';info.profileLocked=true;info.platformName=PROFILES.pc.platform;info.platformKey='pc';info.platformSource='extension';
   if(folder?.platform.key==='dos'){info.profileLocked=false;applyPlatform(info,'dos','folder');}
-  const product=executableTitle(file);
+  let product='';try{product=executableTitle(file);}catch{}
   if(product){title=product;internalTitle=product;identitySource='PE ProductName';}
   else title=cleanPCTitle(path.basename(file,path.extname(file)))||title;
   if(/^(game|start|launcher|shipping|win64|play|run|main|app|client)$/i.test(title))title=cleanPCTitle(path.basename(path.dirname(file)))||path.basename(path.dirname(file));
@@ -73,13 +93,17 @@ export function inspectGame(input){
   }catch{}finally{try{disc?.close();}catch{}}
  }
  // Uncompressed GameCube/Wii images expose a magic signature, disc ID and title.
- if(['iso','gcm'].includes(ext)){const fd=fs.openSync(file,'r');try{const h=Buffer.alloc(160),n=fs.readSync(fd,h,0,h.length,0);if(n===160&&(h.readUInt32BE(28)===0xc2339f3d||h.readUInt32BE(24)===0x5d1c9ea3)){info.profile='dolphin';info.platformName=h.readUInt32BE(24)===0x5d1c9ea3?'Wii':'Nintendo GameCube';info.platformKey=h.readUInt32BE(24)===0x5d1c9ea3?'wii':'gc';info.platformSource='header';discId=h.toString('ascii',0,6);const label=h.toString('utf8',32).split('\0')[0].trim();if(label&&/^[A-Z0-9]{6}$/.test(discId)){title=label;internalTitle=label;identitySource='Disc header';revision=String(h[7]);}}}finally{fs.closeSync(fd);}}
+ // GameCube/Wii: cabeçalho do disco (ISO/GCM direto; RVZ/WIA, WBFS e CISO guardam o mesmo cabeçalho sem compressão).
+ if(['iso','gcm','rvz','wia','wbfs','ciso'].includes(ext)){const h=nintendoDiscHeader(file,ext);if(h){info.profile='dolphin';info.platformName=h.wii?'Wii':'Nintendo GameCube';info.platformKey=h.wii?'wii':'gc';info.platformSource='header';discId=h.id;if(h.title){title=h.title;internalTitle=h.title;identitySource='Disc header';revision=String(h.revision);}}}
  if(ext==='gdi'&&!info.platformKey)applyPlatform(info,'dreamcast','extension');
+ if(ext==='chd'&&!info.platformKey&&chdPlatform(file)==='dreamcast')applyPlatform(info,'dreamcast','header');
  // A pasta só decide quando o conteúdo não identificou (CHD, ZIP, ISO genérica, .bin de cartucho).
  if(!info.platformKey&&folder){applyPlatform(info,folder.platform.key,'folder');}
  if(archive&&folder){try{const entry=mainZipEntry(file);if(entry)title=parseRomName(entry.name).title||title;}catch{}}
  if(info.platformName==='Não informada'&&PROFILES[info.profile])info.platformName=PROFILES[info.profile].platform;
  if(!serial&&discId)serial=normalizeSerial(discId);
+ // Imagem de disco dentro (ou ao lado) da pasta de um port conhecido do mesmo jogo: entra o port.
+ if(info.platformKey&&DISC_PORT_EXT.has(ext)&&!input?.noPort){const near=nearPortExe(file,{platform:info.platformKey,serial:serial||discId});if(near&&near.exe.toLowerCase()!==file.toLowerCase()){try{return inspectGame(near.exe);}catch{}}}
  delete info.profileLocked;
  return {id:digest(windowsPath(file)).slice(0,20),path:file,title:title||'Jogo',bytes:st.size,sizeBasis:['pc','ps3','vita3k','shadps4'].includes(info.profile)?'Tamanho do arquivo executável selecionado; não representa a instalação completa.':null,mtime:st.mtimeMs,profile:info.profile,platformName:info.platformName,platformKey:info.platformKey,platformSource:info.platformSource,discId,serial,internalTitle,identitySource,revision,fileTitle:name.title,region:name.regions,languages:name.languages,discNumber:name.disc,needsReview:info.profile==='custom',art:{}};
 }
@@ -96,17 +120,37 @@ export function suggestedGameRoot(file){
  return dir;
 }
 const CARTRIDGE_BIN=new Set(['genesis','sega32x','atari2600','atari7800','colecovision','intellivision','sms','gamegear','sg1000','pce','lynx','jaguar','msx','wonderswan','wonderswancolor','ngp','ngpc']);
+// Switch: atualizações e DLCs (NSP/XCI) não são jogos. Pelo Title ID do nome ([0100...000] é o jogo base;
+// terminado em 800 é atualização; outros finais são DLC) ou por pastas/nomes de atualização e DLC.
+export function switchExtra(file){const ext=path.extname(file).slice(1).toLowerCase();if(!['nsp','nsz','xci','xcz'].includes(ext))return false;const name=path.basename(file);
+ const id=name.match(/\[(0100[0-9a-f]{12})\]/i)?.[1];if(id)return !/000$/i.test(id);
+ if(/\b(update|upd|dlc|patch)\b|\[(upd|dlc)\]|\bv\d{5,}\b/i.test(name))return true;return /[\\/](updates?|dlcs?|patch(es)?)[\\/][^\\/]+$/i.test(file);}
+// Cabeçalho de disco GameCube/Wii (ID de 6 letras, nome e a assinatura que diz se é Wii ou GameCube).
+export function nintendoDiscHeader(file,ext){let fd;try{fd=fs.openSync(file,'r');const read=(at,n)=>{const b=Buffer.alloc(n);const got=fs.readSync(fd,b,0,n,at);return got===n?b:null;};
+ let at=0;if(ext==='rvz'||ext==='wia'){const h=read(0,0x58);if(!h||!/^(RVZ|WIA)\x01$/.test(h.toString('latin1',0,4)))return null;at=0x58;}
+ else if(ext==='wbfs'){const h=read(0,12);if(!h||h.toString('latin1',0,4)!=='WBFS')return null;const shift=h[8];if(shift<9||shift>16)return null;at=1<<shift;}
+ else if(ext==='ciso'){const h=read(0,8);if(!h||h.toString('latin1',0,4)!=='CISO')return null;at=0x8000;}
+ const d=read(at,0x80);if(!d)return null;const wii=d.readUInt32BE(0x18)===0x5d1c9ea3,gc=d.readUInt32BE(0x1c)===0xc2339f3d;if(!wii&&!gc)return null;
+ const id=d.toString('ascii',0,6);const title=d.toString('utf8',0x20).split('\0')[0].trim();return /^[A-Z0-9]{6}$/.test(id)?{id,title,wii,revision:d[7]}:{id:'',title:'',wii,revision:0};}
+ catch{return null;}finally{if(fd!==undefined)try{fs.closeSync(fd);}catch{}}}
+// CHD de GD-ROM (trilhas CHGD/CHGT nos metadados, que ficam sem compressão) só existe no Dreamcast.
+export function chdPlatform(file){let fd;try{fd=fs.openSync(file,'r');const h=Buffer.alloc(0x38);if(fs.readSync(fd,h,0,h.length,0)<0x38||h.toString('latin1',0,8)!=='MComprHD')return null;const ver=h.readUInt32BE(12);let at=Number(ver>=5?h.readBigUInt64BE(0x30):h.readBigUInt64BE(0x24));
+ for(let i=0;i<64&&at>0;i++){const m=Buffer.alloc(16);if(fs.readSync(fd,m,0,16,at)<16)break;const tag=m.toString('latin1',0,4);if(tag==='CHGD'||tag==='CHGT')return 'dreamcast';if(tag==='DVD ')return null;at=Number(m.readBigUInt64BE(8));}
+ return null;}catch{return null;}finally{if(fd!==undefined)try{fs.closeSync(fd);}catch{}}}
+// ZIP fora de uma pasta com o nome da plataforma: a ROM dentro dele decide (ex.: jogo.zip com jogo.sfc = SNES).
+export function zipPlatform(file){try{const e=mainZipEntry(file);if(!e)return null;const ext=path.extname(e.name).slice(1).toLowerCase();if(!ext||AMBIGUOUS_EXT.has(ext))return null;const list=platformsForExtension(ext);return list.length===1?list[0]:null;}catch{return null;}}
 export function scanGames(root,errors=[]){
  const out=[];let visited=0;
- const walk=(p,depth)=>{if(depth>12||++visited>30000)throw Error('Pasta muito grande. Escolha uma pasta mais específica.');const s=fs.lstatSync(p);if(s.isSymbolicLink())return;
+ const walk=(p,depth)=>{if(depth>12||++visited>30000)throw Error('Pasta muito grande. Escolha uma pasta mais específica.');let s;try{s=fs.lstatSync(p);}catch(e){if(/\.exe$/i.test(p)&&/^(EPERM|EACCES)$/.test(String(e?.code||''))){out.push(p);return;}throw e;}if(s.isSymbolicLink())return;
   if(s.isDirectory()){
    const boot=path.join(p,'PS3_GAME','USRDIR','EBOOT.BIN');if(fs.existsSync(boot)){out.push(boot);return;}
    // Jogos instalados de PS Vita/PS4 (Vita3K, shadPS4): eboot.bin ao lado de sce_sys/param.sfo.
    const sce=path.join(p,'sce_sys','param.sfo');if(fs.existsSync(sce)){const eboot=fs.readdirSync(p).find(n=>n.toLowerCase()==='eboot.bin');if(eboot){out.push(path.join(p,eboot));return;}}
    for(const name of fs.readdirSync(p)){if(AUX_DIR.test(name))continue;if(visited>=30000){errors.push({file:p,message:'Limite de leitura atingido. Escolha uma pasta menor para ver os demais candidatos.'});break;}try{walk(path.join(p,name),depth+1);}catch(e){if(errors.length<100)errors.push({file:path.join(p,name),message:e.message});}}}
   else{const ext=path.extname(p).slice(1).toLowerCase();if(ext==='pkg'){if(errors.length<100)errors.push({file:p,message:'Pacote de instalação: instale no emulador e importe a pasta instalada. PKG não é um executável do jogo.'});return;}
-   if(ARCHIVE_EXT.includes(ext)){const folder=ext==='zip'?platformFromPath(p)?.platform:null;if(folder&&(folder.key==='arcade'||folder.hash&&!['psp','ps1','ps2','segacd','saturn'].includes(folder.hash)))out.push(p);return;}
+   if(ARCHIVE_EXT.includes(ext)){const folder=ext==='zip'?platformFromPath(p)?.platform||zipPlatform(p):null;if(folder&&(folder.key==='arcade'||folder.hash&&!['psp','ps1','ps2','segacd','saturn'].includes(folder.hash)))out.push(p);return;}
    if(!EXTENSIONS.includes(ext)&&!(process.platform==='linux'&&nativeExecutable(p)))return;
+   if(switchExtra(p))return;
    if(GENERIC_EXT.has(ext)){const folder=platformFromPath(p)?.platform;if(!folder||!folder.ext.includes(ext)&&!(ext==='img'&&folder.dat.some(d=>d[0]==='redump')))return;}
    if(depth>0&&ext==='bin'&&path.basename(p).toUpperCase()!=='EBOOT.BIN'){const folder=platformFromPath(p);if(!folder||!CARTRIDGE_BIN.has(folder.platform.key))return;}
    if(depth>0&&ext==='exe'&&auxiliaryExecutable(p))return;out.push(p);}
@@ -130,6 +174,7 @@ export function sweepGames(roots,{maxDirs=60000,maxMs=45000,maxDepth=7,errors=[]
  const out=[],started=Date.now(),skip=new Set(skipPaths.map(p=>path.resolve(p).toLowerCase()));let dirs=0,stopped=false;
  const consider=(p,ext,size)=>{
   if(ext==='exe'||ext==='pkg'||size<16*1024)return;
+  if(switchExtra(p))return;
   if(ARCHIVE_EXT.includes(ext)){const folder=platformFromPath(p)?.platform;if(folder&&(folder.key==='arcade'||folder.hash&&!['psp','ps1','ps2','segacd','saturn'].includes(folder.hash)))out.push(p);return;}
   if(!EXTENSIONS.includes(ext))return;
   if(GENERIC_EXT.has(ext)){const folder=platformFromPath(p)?.platform;if(!folder||!folder.ext.includes(ext)&&!(ext==='img'&&folder.dat.some(d=>d[0]==='redump')))return;}
@@ -161,11 +206,15 @@ export function measureGameFolder(input){
 }
 export function launchFor(g,config,demoExecutable){
  if(g.demo)return {exe:demoExecutable,args:'--taiga-demo '+g.id};
+ // Jogo de loja ainda não instalado: o atalho abre o Taiga Launcher, que instala.
+ if(g.notInstalled)return {exe:demoExecutable||process.execPath,args:'--taiga-launch '+(g.uuid||g.id)};
  const profile=g.profile||'psp';if(!PROFILES[profile])throw Error('Perfil de execução inválido.');
  if(profile==='pc'){if(process.platform==='linux'&&nativeExecutable(g.path))return {exe:g.path,args:g.launch?.args||''};if(!/\.exe$/i.test(g.path))throw Error('Selecione um executável compatível com o sistema.');return {exe:g.path,args:g.launch?.args||''};}
  // Jogos de lojas que exigem o próprio iniciador (Epic gerenciado, Ubisoft, Amazon): abre o link da loja.
  if(profile==='store'){const exe=g.launch?.exe;if(!exe||!fs.existsSync(exe))throw Error('Iniciador da loja não encontrado para '+g.title);const args=String(g.launch?.args||'');if(/[\r\n\0"]/.test(args))throw Error('Link da loja inválido.');
   // Riot Client: argumentos de produto (não é um link). Xbox: shell:AppsFolder\<família>!<app>.
+  // Legendary (jogos da Epic instalados pelo Taiga Launcher): "launch <app>".
+  if(/^legendary(?:\.exe)?$/i.test(path.basename(exe))&&/^launch [\w.-]{1,120}$/.test(args))return {exe,args:args+' --skip-version-check'};
   if(/^riotclientservices\.exe$/i.test(path.basename(exe))&&/^--launch-product=[\w-]+ --launch-patchline=[\w-]+$/.test(args))return {exe,args};
   if(!/^(?:com\.epicgames\.launcher|uplay|amazon-games|goggalaxy|steam|heroic|battlenet|link2ea|origin2):\/\//.test(args)&&!/^shell:AppsFolder\\[\w.-]+_[0-9a-z]{13}![\w.-]+$/.test(args))throw Error('Link da loja inválido.');return {exe,args:'"'+args+'"'};}
  const defaults=config.launchers?.[profile]||{},exe=g.launch?.exe||defaults.exe||(profile==='psp'?config.emulator:'');if(!exe||!fs.existsSync(exe)||!fs.statSync(exe).isFile())throw Error('Configure o executável de '+PROFILES[profile].name+' em Como executar: '+g.title);

@@ -306,4 +306,8 @@ export const TAIGA_DE: Record<string, string> = {
 	steamgriddb_api_key_restored: 'Der Standardschlüssel wurde wiederhergestellt und geprüft.',
 	steamgriddb_api_key_saved: 'Der SteamGridDB-Schlüssel wurde gespeichert und geprüft.',
 	steamgriddb_api_key_restore: 'Standardschlüssel wiederherstellen',
+	taiga_ach_xbox_login: 'Melde dich im Taiga Launcher (Konten) mit deinem Microsoft-Konto an, um die Xbox-Erfolge dieses Spiels zu sehen.',
+	taiga_ach_login: 'Verbinde das Store-Konto im Taiga Launcher (Konten), um die Erfolge dieses Spiels zu sehen.',
+	taiga_ach_unmapped: 'Die Erfolge dieses Spiels sind noch nicht in deinem Konto. Starte das Spiel einmal und versuche es erneut.',
+	taiga_ach_offline: 'Die Erfolge konnten gerade nicht geladen werden. Versuche es gleich noch einmal.',
 };

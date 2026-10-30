@@ -126,6 +126,7 @@ Todo desbloqueio aparece com a **notificação nativa de conquista da Steam**, c
 - **Abre junto com o Windows**, minimizado na bandeja, para a Steam sempre mostrar as páginas personalizadas.
 - **Atualiza sozinho** com um clique.
 - **Edite as artes dos seus outros jogos da Steam** pela aba Biblioteca Steam.
+- **Jogos das lojas que você não instalou**: seus jogos da Epic e do Xbox aparecem na Steam com o botão **Instalar**. Os da Epic baixam com progresso e Cancelar na própria página da Steam (pelo Legendary); os do Xbox abrem no app Xbox. Coleções separadas por loja ("Epic Games", "Xbox"), se quiser.
 - **Enviar para outro PC**: gera um pacote com o programa, sem seus jogos, contas ou logins.
 - **Remove tudo** da Steam com um botão. Seus jogos e saves nunca são tocados.
 
@@ -189,7 +190,7 @@ Use **Relatar problema** no menu lateral ou abra uma [issue](https://github.com/
 
 O Taiga Launcher é gratuito. Se ele melhorou a sua biblioteca, você pode ajudar a continuar crescendo:
 
-<a href="https://github.com/sponsors/GabrielTaiga"><img src="https://img.shields.io/badge/Apoiar%20no%20GitHub-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="Apoiar no GitHub"></a>
+<a href="https://ko-fi.com/gabrieltaiga"><img src="https://img.shields.io/badge/Apoiar%20no%20Ko--fi-FF5E5B?style=for-the-badge&logo=kofi&logoColor=white" alt="Apoiar no Ko-fi"></a> <a href="https://github.com/sponsors/GabrielTaiga"><img src="https://img.shields.io/badge/Apoiar%20no%20GitHub-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="Apoiar no GitHub"></a>
 
 **PIX** (só no Brasil): pela aba **Apoiar** do programa, com QR Code, ou pela chave `e5c0f137-b366-490b-b30c-ef20f4d63c1f`.
 
@@ -202,6 +203,7 @@ Dar uma estrela ⭐ no repositório também ajuda muito.
 Criado por **Taiga ([GabrielTaiga](https://github.com/GabrielTaiga))**.
 
 - **NativeGameLink for Steam**, de David Miranda (Davidjarod11, MIT): a base da página do jogo dentro da Steam.
+- **Legendary** (legendary-gl, GPL-3.0): instala os jogos da Epic. Só é baixado quando você instala um, como um programa separado.
 - **Electron** e **Chromium**: a base do programa.
 - **QR Code Generator**, de Kazuhiko Arase (MIT), e as fontes **Manrope** e **Sora** (SIL OFL).
 - Dados de **SteamGridDB, IGDB, RetroAchievements, libretro, Wikipedia / Wikidata, PCGamingWiki, Exophase** e da **loja da Steam**.

@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {platformByKey} from './platforms.mjs';
 import {cleanPCTitle} from './rom-name.mjs';
-import {scoreCandidate, confidentChoice, normalizeTitle, similarity} from './title-match.mjs';
+import {scoreCandidate, confidentChoice, normalizeTitle, similarity, editionBase} from './title-match.mjs';
 
 // Redump/No-Intro trocam ":" por " - "; para exibição, volta ao formato usual.
 export function displayTitle(datTitle) {
@@ -40,10 +40,13 @@ export function steamAppIdNear(file, root = null) {
 // Nomes candidatos de um jogo de PC: ProductName do executável, pasta do jogo e nome do .exe.
 export function pcNames(item) {
  const names = [];
+ if (item.storeTitleEn) names.push(item.storeTitleEn);
  if (item.identitySource === 'PE ProductName' && item.internalTitle) names.push(item.internalTitle);
  const root = item.gameRoot || item.suggestedRoot;
  if (item.engineProduct) names.push(item.engineProduct);
  if (item.title) names.push(item.title);
+ // Nome sem o sufixo de edição da loja ("20 Year Celebration", "Definitive Edition"...).
+ for (const t of [item.storeTitleEn, item.title]) if (t && editionBase(t) !== String(t).replace(/[™®©]/g, '').trim()) names.push(editionBase(t));
  if (root) names.push(cleanPCTitle(path.basename(root)));
  const exe = path.basename(item.path, path.extname(item.path)), shipping = exe.match(/^(.+?)-(?:Win64|Win32|WinGDK)-Shipping$/i);
  if (shipping) names.push(cleanPCTitle(shipping[1].replace(/([a-z])([A-Z])/g, '$1 $2')));
@@ -115,7 +118,7 @@ export async function identifyPC(item, {steamLink, autoLookup = true}) {
 // Detecção do AppID pelo nome (jogos de PC e de outras lojas já cadastrados): várias fontes de nome,
 // candidato exato e sem empate; com dois nomes concordando ou com o título já identificado.
 export async function steamAppByName(item, steamLink) {
- const names = pcNames(item).slice(0, 4), seen = new Map();
+ const names = pcNames(item).slice(0, 5), seen = new Map();
  for (const name of names) {
   const found = await steamLink.search(name);
   const scored = (found.items || []).map(r => ({...r, ...scoreCandidate(name, r.name, {})}));
@@ -126,7 +129,9 @@ export async function steamAppByName(item, steamLink) {
    const sameTitle = item.title && normalizeTitle(item.title) === normalizeTitle(choice.name) && ['igdb', 'manual', 'dat'].includes(item.titleSource);
    // Nome do produto gravado pelo motor do jogo (Unity app.info) igual ao da Steam também confirma.
    const engine = item.engineProduct && normalizeTitle(item.engineProduct) === normalizeTitle(choice.name);
-   if (agreeing >= 2 || sameTitle || engine || item.storeName && normalizeTitle(item.storeName) === normalizeTitle(choice.name)) return {appId: choice.appId, name: choice.name, confident: true, candidates: [...seen.values()].sort((a, b) => b.score - a.score).slice(0, 6)};
+   // Jogo de loja: o nome da loja sem o sufixo de edição igual ao nome na Steam também confirma.
+   const edition = !!item.store && [item.storeTitleEn, item.storeName, item.title].some(t => t && normalizeTitle(editionBase(t)) === normalizeTitle(choice.name));
+   if (agreeing >= 2 || sameTitle || engine || edition || item.storeName && normalizeTitle(item.storeName) === normalizeTitle(choice.name)) return {appId: choice.appId, name: choice.name, confident: true, candidates: [...seen.values()].sort((a, b) => b.score - a.score).slice(0, 6)};
   }
  }
  return {appId: null, confident: false, candidates: [...seen.values()].sort((a, b) => b.score - a.score).slice(0, 6)};

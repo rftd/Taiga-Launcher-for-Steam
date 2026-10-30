@@ -26,6 +26,8 @@ interface BackendShortcutRecord {
 }
 
 let backendShortcutRecords: ShortcutRecord[] = [];
+let backendRecordsRevision = 0;
+let backendRecordsKey = '';
 let backendRegistryRefresh: Promise<void> | null = null;
 
 function parseBackendShortcutList(raw: unknown): BackendShortcutRecord[] {
@@ -58,7 +60,12 @@ export function refreshShortcutRecordsFromBackend(): Promise<void> {
 				};
 				next.push({ id, title, app });
 			}
+			// Lista igual à anterior: nada a refazer (era refeita inteira a cada leitura).
+			const key = next.map(record => `${record.id}\u0001${record.title}\u0001${record.app.strShortcutExe}\u0001${record.app.strShortcutStartDir}\u0001${record.app.strShortcutLaunchOptions}`).join('\u0002');
+			if (key === backendRecordsKey) return;
+			backendRecordsKey = key;
 			backendShortcutRecords = next;
+			backendRecordsRevision++;
 			replaceFallbackShortcutApps(next.map(record => ({ id: record.id, app: record.app })));
 			scheduleTitleMappingsSync(1200);
 		} catch (error) {
@@ -68,7 +75,21 @@ export function refreshShortcutRecordsFromBackend(): Promise<void> {
 	return backendRegistryRefresh;
 }
 
-export function getAllShortcutRecords(): ShortcutRecord[] {
+// Cópia recente para quem consulta a lista periodicamente (detector de atalhos novos, vínculos por título): evita
+// percorrer todos os apps da Steam várias vezes por segundo. Quem precisa do estado exato chama sem maxAgeMs.
+let recordsCache: { at: number; size: number; backend: number; value: ShortcutRecord[] } | null = null;
+export function shortcutCatalogSignature(): string {
+	const appStore = getSteamAppStore();
+	let size = 0; try { size = Number(appStore?.m_mapApps?.size ?? 0) + Number(appStore?.allApps?.length ?? 0) + Number(appStore?.m_rgApps?.length ?? 0); } catch {}
+	return `${size}|${backendShortcutRecords.length}|${backendRecordsRevision}`;
+}
+export function getAllShortcutRecords(maxAgeMs = 0): ShortcutRecord[] {
+	if (maxAgeMs > 0 && recordsCache && Date.now() - recordsCache.at < maxAgeMs && recordsCache.backend === backendRecordsRevision) return recordsCache.value.slice();
+	const records = collectAllShortcutRecords();
+	recordsCache = { at: Date.now(), size: records.length, backend: backendRecordsRevision, value: records };
+	return records.slice();
+}
+function collectAllShortcutRecords(): ShortcutRecord[] {
 	const appStore = getSteamAppStore();
 	const records: ShortcutRecord[] = [];
 	const seen = new Set<number>();
@@ -209,7 +230,7 @@ export function findMappingForShortcut(
 let titleSyncScheduled = false;
 export function syncTitleMappingsForKnownShortcuts(): void {
 	if (!isMappingSnapshotVerified()) return;
-	const records = getAllShortcutRecords();
+	const records = getAllShortcutRecords(1500);
 	const toSet: Record<string, string> = {};
 	for (const record of records) {
 		const steamAppId = mappings[shortcutMappingKey(record.id)];

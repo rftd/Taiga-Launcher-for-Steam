@@ -229,7 +229,7 @@ export function ensureLocalAchievementSidebarResponsiveGrid(summary: HTMLElement
 
 /** End a neutral loading state when no confirmed local progress is available.
  * A completed request is never presented as perpetual loading or invented 0/N. */
-export function revealPendingAchievementSidebar(doc: Document): void {
+export function revealPendingAchievementSidebar(doc: Document, message = ''): void {
 	const section = doc.getElementById('gdl-achievements-section');
 	section?.removeAttribute('data-gdl-achievements-pending');
 	const pending = section?.querySelector<HTMLElement>('[data-gdl-achievement-pending="1"]');
@@ -237,7 +237,7 @@ export function revealPendingAchievementSidebar(doc: Document): void {
 	pending.dataset.gdlAchievementPending = 'unavailable';
 	pending.setAttribute('aria-busy', 'false');
 	const status = pending.querySelector<HTMLElement>('[role="status"]');
-	if (status) status.textContent = gdlText('game_achievement_path_failed', 'Achievement progress is unavailable.');
+	if (status) status.textContent = message || gdlText('game_achievement_path_failed', 'Achievement progress is unavailable.');
 }
 
 export function renderLocalAchievementSidebar(doc: Document, data: LocalAchievementData): void {

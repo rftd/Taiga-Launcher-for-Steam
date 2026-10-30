@@ -1,7 +1,7 @@
 import { findModuleExport } from '@steambrew/client';
 import { isTaigaVirtualAppId } from '../../core/taiga';
 import type { SteamCommunityCardAsset, SteamCommunityItemsCatalog } from '../../domain/types';
-import { backendLog, fetchCommunityItemsCatalogBackend, parseCommunityItemsCatalogResponse } from '../../api/backend';
+import { backendLog, fetchCommunityItemsCatalogBackend, parseCommunityItemsCatalogResponse, taigaVirtualCardsBackend } from '../../api/backend';
 import { CACHE_RETENTION, CACHE_TTL, cacheDeleteMatching, cacheRead, cacheSet } from '../../core/cache';
 import { RetryingRequestCache } from '../../core/request-cache';
 import { getSteamLanguage } from '../../steam/localization';
@@ -26,6 +26,8 @@ export function getCachedOfficialCommunityItems(steamAppId: string, language: st
 export function normalizeCommunityAssetUrl(raw: unknown): string {
 	let value = typeof raw === 'string' ? raw.trim() : '';
 	if (!value) return '';
+	// Cartas e imagens geradas pelo Taiga Launcher no próprio PC.
+	if (/^http:\/\/127\.0\.0\.1:\d{2,5}\/(?:card|art)\//.test(value)) return value;
 	if (value.startsWith('//')) value = 'https:' + value;
 	else if (value.startsWith('/')) value = 'https://steamcommunity.com' + value;
 	else if (value.startsWith('http://')) value = 'https://' + value.slice(7);
@@ -163,9 +165,20 @@ async function readNativeSteamCommunityItems(doc: Document, steamAppId: string):
 	return null;
 }
 
+const virtualCatalogs = new Map<string, { at: number; data: SteamCommunityItemsCatalog }>();
 export async function getOfficialCommunityItems(doc: Document, steamAppId: string,
 	requestedLanguage?: string): Promise<SteamCommunityItemsCatalog | null> {
-	if (isTaigaVirtualAppId(steamAppId)) return null;
+	// Taiga Launcher: jogo sem página na Steam (emulador e outros): cartas geradas pelo programa.
+	if (isTaigaVirtualAppId(steamAppId)) {
+		const hit = virtualCatalogs.get(steamAppId);
+		if (hit && Date.now() - hit.at < (hit.data.cards.length ? 600000 : 30000)) return hit.data;
+		try {
+			const raw = JSON.parse(await taigaVirtualCardsBackend({ steam_app_id: steamAppId })) as SteamCommunityItemsCatalog;
+			const data: SteamCommunityItemsCatalog = { appid: Number(steamAppId), generated: true, game: raw.game, source: raw.source, cards: (raw.cards || []).filter(c => c && normalizeCommunityAssetUrl(c.image)), badges: raw.badges || [] };
+			virtualCatalogs.set(steamAppId, { at: Date.now(), data });
+			return data;
+		} catch (e) { backendLog('Taiga cartas: ' + e); return null; }
+	}
 	const language = String(requestedLanguage || await getSteamLanguage().catch(() => 'english') || 'english').toLowerCase();
 	const key = `${steamAppId}:${language}`;
 	const snapshot = getCachedOfficialCommunityItems(steamAppId, language);

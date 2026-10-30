@@ -1,5 +1,6 @@
 import { injectAchievementStyle } from './inject';
 import { steamRareAchievementStyles } from './rare';
+import { perfectCss } from '../perfect';
 
 export function ensureAchievementModalStyles(doc: Document): void {
 	injectAchievementStyle(doc, 'gdl-achievement-modal-style', `
@@ -573,5 +574,6 @@ ${steamRareAchievementStyles().replace(/#gdl-achievement-modal/g, '#gdl-local-ac
 			.gdl-lam-row.is-global { height: auto !important; }
 			.gdl-lam-row.is-global .gdl-lam-row-main { flex-basis: auto !important; }
 		}
+${perfectCss('#gdl-local-achievement-modal')}
 	`);
 }

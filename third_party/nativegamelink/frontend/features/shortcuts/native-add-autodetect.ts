@@ -2,7 +2,7 @@ import { backendLog } from '../../api/backend';
 import { getPreferences } from '../../core/preferences';
 import { readShortcutOverviewField, shortcutExecutableIdentity, shortcutStableIdentity } from '../../steam/shortcuts';
 import { candidateSteamDocuments, nativeAddNonSteamDialogOpen, nativeAddSelectedExecutableIdentities } from './native-add-guard';
-import { getAllShortcutRecords, refreshShortcutRecordsFromBackend, shortcutAlreadyLinked, type ShortcutRecord } from './registry';
+import { getAllShortcutRecords, refreshShortcutRecordsFromBackend, shortcutAlreadyLinked, shortcutCatalogSignature, type ShortcutRecord } from './registry';
 import { requestNativeAddShortcutReview } from './manual-link';
 
 let watcherTimer: ReturnType<typeof setInterval> | null = null;
@@ -34,7 +34,8 @@ let registryRefreshInFlight: Promise<void> | null = null;
 
 function refreshBackendRegistry(force = false): void {
 	const now = Date.now();
-	const interval = dialogOpen ? 900 : 4000;
+	// Lista de atalhos do disco: rápido com a janela de adicionar aberta; fora dela, a cada 30 s (antes 4 s).
+	const interval = dialogOpen ? 900 : 30000;
 	if (!force && (registryRefreshInFlight || now - registryRefreshAt < interval)) return;
 	registryRefreshAt = now;
 	registryRefreshInFlight = refreshShortcutRecordsFromBackend()
@@ -136,9 +137,15 @@ function triggerShortcutAutoReview(record: ShortcutRecord): boolean {
 	return requestNativeAddShortcutReview(record.id, record.title);
 }
 
+// Com a janela "Adicionar jogo" fechada, nada novo aparece sem a lista de apps da Steam mudar de tamanho: sem mudança,
+// a varredura é pulada (antes percorria todos os apps a cada 4 s).
+let lastScanSignature = '';
 function scanForNewlyAddedShortcuts(): void {
 	if (!getPreferences().autoDetectShortcuts) return;
-	const records = getAllShortcutRecords();
+	const signature = shortcutCatalogSignature();
+	if (!dialogOpen && startupSettled && signature === lastScanSignature) return;
+	lastScanSignature = signature;
+	const records = getAllShortcutRecords(dialogOpen ? 0 : 1500);
 	if (!records.length) return;
 
 	const inStartupWarmup = !startupSettled || (Date.now() - pluginStartedAt < STARTUP_WARMUP_MS);

@@ -131,19 +131,37 @@ export class StoreAchievements {
  }
  // Xbox / Microsoft Store: conquistas da conta Xbox (login no Taiga Launcher). O jogo é achado na lista de títulos da
  // conta pelo nome do pacote (PFN) ou, se faltar, pelo nome.
- async xbox({session, pfn = '', name = '', language = 'pt-BR', live = false}) {
+ async xbox({session, pfn = '', titleId = '', name = '', altNames = [], language = 'pt-BR', live = false}) {
   if (!session?.xsts?.token) return {status: 'unconfigured', provider: 'xbox', source: 'Xbox', message: 'Entre com a sua conta Microsoft em Contas para ver as conquistas do Xbox.', achievements: []};
   const lang = {'pt-BR': 'pt-BR', en: 'en-US', es: 'es-ES', fr: 'fr-FR', de: 'de-DE'}[language] || 'en-US', auth = 'XBL3.0 x=' + session.xsts.uhs + ';' + session.xsts.token, xuid = session.xsts.xuid;
-  const titlesKey = 'xbox-titles|' + xuid; let titles = this.cached(titlesKey, 6 * 3600000);
-  if (!titles) { const t = JSON.parse(await this.http('https://titlehub.xboxlive.com/users/xuid(' + xuid + ')/titles/titlehistory/decoration/achievement,detail', {headers: {Authorization: auth, 'x-xbl-contract-version': '2', 'Accept-Language': lang, Accept: 'application/json'}})); titles = this.store(titlesKey, (t.titles || []).map(x => ({titleId: String(x.titleId), pfn: String(x.pfn || ''), name: String(x.name || '')}))); }
-  const norm = v => String(v || '').toLowerCase().normalize('NFD').replace(/[^\p{L}\p{N}]+/gu, '');
-  const title = titles.find(t => pfn && t.pfn.toLowerCase() === pfn.toLowerCase()) || titles.find(t => name && norm(t.name) === norm(name));
+  const headers = v => ({Authorization: auth, 'x-xbl-contract-version': v, 'Accept-Language': lang, Accept: 'application/json'});
+  const shape = list => (list || []).map(x => ({titleId: String(x.titleId), pfn: String(x.pfn || ''), name: String(x.name || ''), total: Number(x.achievement?.totalAchievements) || 0}));
+  // Nome sem sinais, "™", "for Windows", "(PC)", "Windows 10 Edition" e afins: o mesmo jogo com nomes um pouco diferentes.
+  const norm = v => String(v || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[™®©]/g, '').replace(/\((?:pc|windows(?: 10)?|game preview)\)/g, '').replace(/\b(?:for windows(?: 10)?|windows(?: 10)? edition|pc edition|xbox one edition|game preview)\b/g, '').replace(/[^\p{L}\p{N}]+/gu, '');
+  const names = [name, ...altNames].map(norm).filter(Boolean);
+  const pick = list => list.find(t => titleId && t.titleId === String(titleId)) || list.find(t => pfn && t.pfn.toLowerCase() === pfn.toLowerCase()) || list.find(t => names.includes(norm(t.name)));
+  const titlesKey = 'xbox-titles|' + xuid;
+  const loadTitles = async () => this.store(titlesKey, shape(JSON.parse(await this.http('https://titlehub.xboxlive.com/users/xuid(' + xuid + ')/titles/titlehistory/decoration/achievement,detail', {headers: headers('2')})).titles));
+  let titles = this.cached(titlesKey, 6 * 3600000), title = titles ? pick(titles) : null;
+  // Jogo aberto há pouco ainda não estava na lista guardada: busca a lista de novo (no máximo a cada 2 min).
+  if (!title && (!titles || !this.cached(titlesKey, 120000))) { titles = await loadTitles(); title = pick(titles); }
+  // Fora do histórico: pergunta direto pelo Title ID ou pelo pacote.
+  for (const q of !title ? [titleId && 'titleid(' + titleId + ')', pfn && 'pfn(' + pfn + ')'].filter(Boolean) : []) {
+   try { const t = shape(JSON.parse(await this.http('https://titlehub.xboxlive.com/users/xuid(' + xuid + ')/titles/' + q + '/decoration/achievement,detail', {headers: headers('2')})).titles)[0]; if (t?.titleId) { title = t; break; } } catch {}
+  }
   if (!title) return {status: 'unmapped', provider: 'xbox', source: 'Xbox', message: 'Este jogo ainda não aparece no histórico da sua conta Xbox. Abra o jogo uma vez e tente de novo.', achievements: []};
   const key = 'xbox-ach|' + xuid + '|' + title.titleId + '|' + lang, hit = live ? null : this.cached(key, 60000); if (hit) return hit;
-  const d = JSON.parse(await this.http('https://achievements.xboxlive.com/users/xuid(' + xuid + ')/achievements?titleId=' + title.titleId + '&maxItems=1000', {headers: {Authorization: auth, 'x-xbl-contract-version': '2', 'Accept-Language': lang, Accept: 'application/json'}}));
-  const achievements = (d.achievements || []).map(a => { const unlocked = a.progressState === 'Achieved', icon = (a.mediaAssets || []).find(m => /icon/i.test(m.type || m.name))?.url || ''; return {id: String(a.id), title: String(a.name || '').trim(), description: String((unlocked ? a.description : a.lockedDescription || a.description) || '').trim(), icon, lockedIcon: icon, hidden: !!a.isSecret, unlocked, date: unlocked && a.progression?.timeUnlocked && !/^0001/.test(a.progression.timeUnlocked) ? new Date(a.progression.timeUnlocked).toISOString() : null, globalPercent: Number.isFinite(Number(a.rarity?.currentPercentage)) ? Number(a.rarity.currentPercentage) : null}; });
+  // Todas as páginas (jogos com muitas conquistas vêm em partes).
+  const raw = []; let token = '';
+  for (let page = 0; page < 10; page++) {
+   const d = JSON.parse(await this.http('https://achievements.xboxlive.com/users/xuid(' + xuid + ')/achievements?titleId=' + title.titleId + '&maxItems=1000' + (token ? '&continuationToken=' + encodeURIComponent(token) : ''), {headers: headers('2')}));
+   raw.push(...(d.achievements || [])); token = d.pagingInfo?.continuationToken || ''; if (!token) break;
+  }
+  const achievements = raw.map(a => { const unlocked = a.progressState === 'Achieved', icon = (a.mediaAssets || []).find(m => /icon/i.test(m.type || m.name))?.url || (a.mediaAssets || [])[0]?.url || '', req = (a.progression?.requirements || [])[0], cur = Number(req?.current), target = Number(req?.target); return {id: String(a.id), title: String(a.name || '').trim() || ('#' + a.id), description: String((unlocked ? a.description : a.lockedDescription || a.description) || '').trim(), icon, lockedIcon: icon, hidden: !!a.isSecret, unlocked, date: unlocked && a.progression?.timeUnlocked && !/^0001/.test(a.progression.timeUnlocked) ? new Date(a.progression.timeUnlocked).toISOString() : null, globalPercent: Number.isFinite(Number(a.rarity?.currentPercentage)) ? Number(a.rarity.currentPercentage) : null, ...(!unlocked && Number.isFinite(cur) && Number.isFinite(target) && target > 1 ? {progress: Math.max(0, cur), maxProgress: target} : {})}; });
+  if (!achievements.length) return {status: 'unmapped', provider: 'xbox', source: 'Xbox', message: title.total ? 'O Xbox ainda não liberou a lista de conquistas deste jogo para a sua conta. Tente de novo em alguns minutos.' : 'Este jogo não tem conquistas no Xbox.', achievements: []};
   return this.store(key, {status: 'ok', provider: 'xbox', source: 'Xbox', sourceLanguage: language, progressKnown: true, achievements});
  }
+
 }
 // Primeiro valor JSON completo (array/objeto) de um texto.
 export function extractJSON(text) {

@@ -2,6 +2,7 @@ import { backendLog } from '../../api/backend';
 import { ensureLocalPlaybarStat } from '../achievements/playbar';
 import { getAchievementProgress } from '../achievements/progress';
 import { revealPendingAchievementSidebar, renderLocalAchievementSidebar } from '../achievements/sidebar';
+import { taigaAchievementEmptyText } from '../achievements/empty-text';
 import { cacheLocalAchievements, getCachedLocalAchievementsForShortcut } from '../achievements/cache';
 import { isCurrentAchievementTarget, linkedAchievementTarget, ownsAchievementSidebar } from '../achievements/navigation';
 import { fetchLocalAchievementData } from '../achievements/service';
@@ -46,14 +47,19 @@ export async function finalizeLinkedAchievements(doc: Document, context: LinkedA
 	if (cachedLocal?.found && Array.isArray(cachedLocal.achievements) && cachedLocal.total > 0) {
 		void apply(cachedLocal).catch(error => backendLog('Cached achievements render error: ' + String(error)));
 	}
+	let taigaEmpty = '';
+	let taigaGame = false;
 	try {
 		const local = await fetchLocalAchievementData(target.steamAppId, { stateAppId: target.shortcutAppId });
 		if (!current()) return;
 		if (local?.found && Array.isArray(local.achievements) && local.total > 0) { await apply(local); return; }
+		// Taiga Launcher: jogo do programa (Xbox, Epic, GOG...) sem lista agora. O progresso da Steam desse AppID é de
+		// outra conta/loja e abria uma janela "0 de N" vazia; no lugar, o motivo aparece na seção.
+		if (local && local.taiga_status) { taigaGame = true; taigaEmpty = taigaAchievementEmptyText(local); }
 	} catch (error) {
 		backendLog('Local achievements check in finalizeLinkedAchievements error: ' + error);
 	}
-	const progress = await getAchievementProgress(Number(target.steamAppId), context.fallbackTotal);
+	const progress = taigaGame ? null : await getAchievementProgress(Number(target.steamAppId), context.fallbackTotal);
 	if (!current()) return;
 	await runWhenLibrarySidebarIdle(doc, 'linked-achievements', () => {
 		if (!current()) return;
@@ -67,6 +73,6 @@ export async function finalizeLinkedAchievements(doc: Document, context: LinkedA
 				state_appid: target.shortcutAppId, ...progress, achievements: [],
 			});
 		}
-		if (ownsAchievementSidebar(doc, target)) revealPendingAchievementSidebar(doc);
+		if (ownsAchievementSidebar(doc, target)) revealPendingAchievementSidebar(doc, taigaEmpty);
 	});
 }

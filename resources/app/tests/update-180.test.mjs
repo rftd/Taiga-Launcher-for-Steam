@@ -92,7 +92,7 @@ test('1.8.0: Accounts as cards with official logos; toggles not all white; texts
 test('1.8.1: first-run tour, accounts intro, new Add games dialog, emulator-only search', () => {
   const server = fs.readFileSync(new URL('../server.mjs', import.meta.url), 'utf8');
   const ob = app.slice(app.indexOf('function renderOnboarding(){'), app.indexOf('async function pickSetting('));
-  for (const step of ["st==='steam'", "st==='games'", "st==='found'", 'ILL.emus']) assert.ok(ob.includes(step), step);
+  for (const step of ["st==='steam'", "st==='games'", "st==='found'", "st==='accounts'"]) assert.ok(ob.includes(step), step);
   assert.match(app, /function renderLanguagePicker\(\)\{const cur=state\.settings\?\.language,languages=\[\.\.\.\(globalThis\.TaigaLocales\?\.languages\|\|\[\]\)\][^;]*;\$\('#app'\)\.innerHTML=obShell\(ILL\.globe/);
   assert.match(app, /case 'ob2-auto':case 'ob2-retry':task\(async\(\)=>\{if\(UI\.discoverPromise\)await UI\.discoverPromise\.catch\(\(\)=>\{\}\);const res=await importGames\('discover',null,\{background:true,stores:false,quiet:true,sweep:'home'\}\)/);
   assert.match(app, /if\(UI\.view==='accounts'&&!introSeen\('accounts'\)\)accountsIntro\(\)/);
@@ -121,7 +121,7 @@ test('1.8.3: account picker collapsed, in-app Steam picker, quick search covers 
 
 test('1.8.4: PC games step, Steam question before identifying a PC game, "Select the game" title, language screen stays until setup', () => {
   assert.match(app, /else if\(st==='pc'\)/);
-  assert.match(app, /const dots=\['steam','games','pc','emus'\]/);
+  assert.match(app, /const dots=\['steam','games','pc','accounts','stores','collections'\]/);
   assert.ok(!app.includes("T('ob2.step2')"));
   assert.match(app, /function steamAsk\(g\)/);
   assert.match(app, /renderSteamStrip\(g\)/);

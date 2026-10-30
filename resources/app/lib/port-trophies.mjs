@@ -16,6 +16,7 @@ import {digest, json, save} from './files.mjs';
 import {parseTrophyXML} from './rpcs3-achievements.mjs';
 import {consoleTitleNear} from './console-port.mjs';
 import {shadps4Roots} from './console-trophies.mjs';
+import {portTrophyLogs} from './port-profiles.mjs';
 
 const isFile = f => { try { return fs.statSync(f).isFile(); } catch { return false; } };
 const isDir = f => { try { return fs.statSync(f).isDirectory(); } catch { return false; } };
@@ -28,9 +29,13 @@ export const PORT_TROPHY_PATTERNS = [
  /\bunlock(?:ed|ing)?\s+troph(?:y|ies)\s*(?:id\s*)?[#:=]?\s*(\d{1,3})\b/i,
  /\bUnlockTrophy\b[^\n]*?\btroph(?:y)?_?id\s*[:=]\s*(\d{1,3})\b/i,
 ];
-export function parsePortTrophyLines(text) {
+// trophyLog: arquivo trophies.log do bloodborne_pc ("id horário-unix" por linha).
+export function parsePortTrophyLines(text, {trophyLog = false} = {}) {
  const ids = [];
- for (const line of String(text).split(/\r?\n/)) for (const re of PORT_TROPHY_PATTERNS) { const m = line.match(re); if (m) { ids.push(Number(m[1])); break; } }
+ for (const line of String(text).split(/\r?\n/)) {
+  if (trophyLog) { const m = line.trim().match(/^(\d{1,3})\s+\d{9,11}$/); if (m) ids.push(Number(m[1])); continue; }
+  for (const re of PORT_TROPHY_PATTERNS) { const m = line.match(re); if (m) { ids.push(Number(m[1])); break; } }
+ }
  return ids;
 }
 
@@ -107,8 +112,21 @@ const saveIcon = (dataDir, bytes) => {
 };
 
 // Lista de troféus de um port: {set, title, sourceLanguage, detail: 'full'|'icons', achievements:[{id,title,description,grade,hidden,icon}]}.
-export function portTrophyDefinitions(port, {config = {}, dataDir, language = 'pt-BR', env = process.env, exeDir = ''} = {}) {
+// A lista vem de um pacote que pode ter dezenas de MB (e ser cifrada): guardada enquanto o pacote, o idioma e a chave
+// forem os mesmos (a página do jogo pede as conquistas a cada poucos segundos).
+const defsMemo = new Map();
+export function portTrophyDefinitions(port, opts = {}) {
  if (!port?.dump) return null;
+ const {config = {}, language = 'pt-BR', env = process.env, exeDir = '', exeFile = ''} = opts;
+ const packs = portTrophyPacks(port.dump), trophyKey = findTrophyKey(config, {extraDirs: [exeDir, exeDir && path.join(exeDir, 'user')], env});
+ const stamp = packs.map(p => { try { const st = fs.statSync(p.file); return p.file + ':' + st.mtimeMs + ':' + st.size; } catch { return p.file; } }).join('|');
+ const memoKey = [port.dump, language, trophyKey ? digest(Buffer.from(String(trophyKey))).slice(0, 12) : '', exeFile, opts.dataDir || '', stamp].join('\u0001');
+ const hit = defsMemo.get(memoKey); if (hit && Date.now() - hit.at < 2 * 60000) return hit.value ? structuredClone(hit.value) : null;
+ const value = readPortTrophyDefinitions(port, opts);
+ if (defsMemo.size > 50) defsMemo.clear(); defsMemo.set(memoKey, {at: Date.now(), value});
+ return value ? structuredClone(value) : null;
+}
+function readPortTrophyDefinitions(port, {config = {}, dataDir, language = 'pt-BR', env = process.env, exeDir = '', exeFile = ''} = {}) {
  const ids = npCommIds(port.dump), key = findTrophyKey(config, {extraDirs: [exeDir, exeDir && path.join(exeDir, 'user')], env});
  for (const pack of portTrophyPacks(port.dump)) {
   let buf; try { if (fs.statSync(pack.file).size > 64 * 1024 * 1024) continue; buf = fs.readFileSync(pack.file); } catch { continue; }
@@ -128,7 +146,7 @@ export function portTrophyDefinitions(port, {config = {}, dataDir, language = 'p
    try { def = parseTrophyXML(xml); if (!def.achievements.some(a => a.title)) { def = null; continue; } sourceLanguage = base.startsWith('TROP_') && (LANG_FILES[language] || []).includes(base.slice(5)) ? language : 'en'; break; } catch { def = null; }
   }
   // Sem chave: arquivos que o shadPS4 já extraiu (trophy/<NPWR>/Xml).
-  if (!def && set) for (const root of shadps4Roots(config, env)) {
+  if (!def && set) for (const root of [...shadps4Roots(config, env), ...(exeFile ? portUserDirs(exeFile) : [])]) {
    const folder = path.join(root, 'trophy', set, 'Xml');
    for (const name of [...(LANG_FILES[language] || []).map(n => `TROP_${n}.XML`), 'TROP.XML']) { const f = path.join(folder, name); if (!isFile(f)) continue; try { def = parseTrophyXML(fs.readFileSync(f)); sourceLanguage = name.startsWith('TROP_') ? language : 'en'; break; } catch {} }
    if (def) break;
@@ -160,14 +178,90 @@ export class PortTrophyStore {
  remove(uuid, id) { const d = this.get(uuid), key = String(Number(id)); if (!d.unlocked[key]) return false; delete d.unlocked[key]; if (d.manual) delete d.manual[key]; save(this.file(uuid), d); return true; }
 }
 
+// ── SpartanPort (versões novas): troféus guardados pelo próprio port ──
+// <pasta do usuário>/trophies.dat: 16 bytes, quatro palavras de 32 bits little-endian; o troféu id é o bit id % 32 da
+// palavra id / 32. <pasta do usuário>/trophy_texts.txt: "ID=Nome | Descrição" no idioma do launcher do port.
+export function portUserDirs(exe) {
+ const dir = path.dirname(exe), parent = path.dirname(dir), out = [], add = d => { if (d && !out.includes(d)) out.push(d); };
+ // settings.json do launcher (Python ou Rust; no pacote o jogo fica em bin/ e as configurações na pasta acima).
+ for (const base of [dir, path.join(dir, 'user'), path.join(dir, 'data'), parent]) {
+  const j = json(path.join(base, 'settings.json'), null), u = j && typeof j.user_dir === 'string' ? j.user_dir.trim() : '';
+  if (u) add(path.isAbsolute(u) || /^[A-Za-z]:[\\/]/.test(u) ? u : path.join(base, u));
+ }
+ add(path.join(dir, 'user')); add(path.join(dir, 'data', 'user')); add(path.join(parent, 'user'));
+ return out;
+}
+export function parseTrophiesDat(buf) {
+ const ids = []; if (!Buffer.isBuffer(buf) || buf.length < 4) return ids;
+ for (let w = 0; w * 4 + 4 <= Math.min(buf.length, 16); w++) { const v = buf.readUInt32LE(w * 4); for (let b = 0; b < 32; b++) if (v & (1 << b) >>> 0) ids.push(w * 32 + b); }
+ return ids;
+}
+export function trophiesDatFiles(exe) { const out = []; for (const d of portUserDirs(exe)) { const f = path.join(d, 'trophies.dat'); if (isFile(f)) out.push(f); } return out; }
+export function parseTrophyTexts(text) {
+ const out = new Map();
+ for (const line of String(text || '').split(/\r?\n/)) { const m = line.match(/^\s*(\d{1,3})\s*=\s*([^|]*?)\s*(?:\|\s*(.*?))?\s*$/); if (m && m[2]) out.set(Number(m[1]), {title: m[2], description: m[3] || ''}); }
+ return out;
+}
+export function portTrophyTexts(exe) {
+ // Idioma em que o launcher do port escreveu o arquivo ("# ... (language: en)"): os nomes são traduzidos para o idioma do
+ // Taiga Launcher quando forem de outro.
+ const LANGS = {en: 'en', english: 'en', pt: 'pt-BR', 'pt-br': 'pt-BR', brazilian: 'pt-BR', portuguese: 'pt-BR', es: 'es', spanish: 'es', fr: 'fr', french: 'fr', de: 'de', german: 'de'};
+ for (const d of portUserDirs(exe)) for (const name of ['trophy_texts.txt', 'trophy_names.txt']) { const f = path.join(d, name); try { if (fs.statSync(f).size < 512 * 1024) { const text = fs.readFileSync(f, 'utf8'), m = parseTrophyTexts(text); if (m.size) { const lang = (text.match(/^#.*\blanguage:\s*([a-z-]+)/im) || [])[1]; m.language = LANGS[String(lang || '').toLowerCase()] || 'en'; return m; } } } catch {} }
+ return null;
+}
+
+// ── Ports da família ps3recomp (Yakuza Dead Souls, inFAMOUS, Demon's Souls...): gamedata/trophies/<NPWR>.json ──
+// {"trophies":[{"id":N,"timestamp":T}]}, T em CellRtcTick (microssegundos desde o ano 1) ou, nos arquivos antigos,
+// segundos Unix. O caminho é relativo à pasta de onde o jogo roda (a do .exe ou até duas acima).
+const RTC_EPOCH = 62135596800;
+export function rtcToUnix(t) { const n = Number(t) || 0; if (!n) return 0; return n < 1e12 ? Math.floor(n) : Math.max(0, Math.floor(n / 1e6) - RTC_EPOCH); }
+export function parsePs3recompTrophies(text) {
+ let j; try { j = JSON.parse(String(text || '')); } catch { return []; }
+ return (Array.isArray(j?.trophies) ? j.trophies : []).filter(t => Number.isInteger(Number(t?.id)) && Number(t.id) >= 0 && Number(t.id) < 256).map(t => ({id: Number(t.id), at: rtcToUnix(t.timestamp)}));
+}
+// ── Dragon's Crown Pro PC: <usuário>/trophy/<NPWR>/progress_user<n>.txt ("DCP-TROPHIES 1", "unlocked <id> <unix>") ──
+export function parseDcpProgress(text) {
+ const lines = String(text || '').split(/\r?\n/); if (!/^DCP-TROPHIES\s+\d/.test(lines[0] || '')) return [];
+ const out = []; for (const l of lines) { const m = l.match(/^unlocked\s+(\d{1,3})\s+(\d+)\s*$/); if (m) out.push({id: Number(m[1]), at: Number(m[2]) || 0}); }
+ return out;
+}
+const NPWR = /^NPWR\d{5}_\d{2}$/i;
+// Arquivos de progresso que o próprio port grava: [{file, kind: 'dat'|'ps3recomp'|'dcp'}].
+export function portProgressFiles(exe) {
+ const out = [], add = (file, kind) => { if (!out.some(x => x.file === file) && isFile(file)) out.push({file, kind}); };
+ for (const f of trophiesDatFiles(exe)) add(f, 'dat');
+ let d = path.dirname(exe);
+ for (let i = 0; i < 3; i++) {
+  for (const e of list(path.join(d, 'gamedata', 'trophies')).slice(0, 40)) if (e.isFile() && /^NPWR\d{5}(_\d{2})?\.json$/i.test(e.name)) add(path.join(d, 'gamedata', 'trophies', e.name), 'ps3recomp');
+  const up = path.dirname(d); if (up === d) break; d = up;
+ }
+ for (const u of portUserDirs(exe)) for (const e of list(path.join(u, 'trophy')).slice(0, 20)) if (e.isDirectory() && NPWR.test(e.name)) for (const f of list(path.join(u, 'trophy', e.name))) if (f.isFile() && /^progress_user\d+\.txt$/i.test(f.name)) add(path.join(u, 'trophy', e.name, f.name), 'dcp');
+ return out.slice(0, 12);
+}
+const progressKind = file => /(^|[\\/])trophies\.dat$/i.test(file) ? 'dat' : /[\\/]gamedata[\\/]trophies[\\/][^\\/]+\.json$/i.test(file) ? 'ps3recomp' : /(^|[\\/])progress_user\d+\.txt$/i.test(file) ? 'dcp' : '';
+// Troféus de um arquivo de progresso: [{id, at}] (at 0 = sem data; usa a do arquivo).
+export function readProgressFile(file, kind = progressKind(file)) {
+ try {
+  const st = fs.statSync(file); if (st.size > 1024 * 1024) return [];
+  const mt = Math.floor(st.mtimeMs / 1000), buf = fs.readFileSync(file);
+  const list = kind === 'dat' ? parseTrophiesDat(buf).map(id => ({id, at: 0})) : kind === 'ps3recomp' ? parsePs3recompTrophies(buf.toString('utf8')) : kind === 'dcp' ? parseDcpProgress(buf.toString('utf8')) : [];
+  return list.map(x => ({id: x.id, at: x.at > 0 && x.at <= mt + 86400 ? x.at : mt}));
+ } catch { return []; }
+}
+
 // Resultado no formato do gerenciador de conquistas.
 export function readPortTrophies(game, port, {config = {}, dataDir, store, env = process.env, names = null, namesLanguage = 'en', namesSource = 'Exophase'} = {}) {
  const language = config.language || 'pt-BR';
- const defs = portTrophyDefinitions(port, {config, dataDir, language, env, exeDir: game.path ? path.dirname(game.path) : ''});
+ const defs = portTrophyDefinitions(port, {config, dataDir, language, env, exeDir: game.path ? path.dirname(game.path) : '', exeFile: game.path || ''});
  if (!defs) return null;
  // Lista cifrada: nomes, descrições, tipo e raridade vindos de fora (Exophase), na mesma ordem dos IDs.
  let sourceLanguage = defs.sourceLanguage, detail = defs.detail;
  if ((detail === 'icons' || namesSource === 'PlayStation') && Array.isArray(names) && names.length === defs.achievements.length) { defs.achievements = defs.achievements.map((a, i) => ({...a, title: names[i].title || a.title, description: names[i].description || '', grade: names[i].grade || '', hidden: !!names[i].hidden, globalPercent: names[i].globalPercent ?? null})); if (!defs.achievements.some(a => a.grade === 'P') && /^(unlock|obtain|earn|collect)\b.*\ball\b.*\btroph/i.test(names[0]?.description || '')) defs.achievements[0].grade = 'P'; sourceLanguage = namesLanguage; detail = namesSource === 'PlayStation' ? 'psn' : 'online'; }
+ // Nomes gravados pelo port (SpartanPort: trophy_texts.txt, no idioma do launcher dele) quando a lista é só de ícones.
+ if (game.path && (detail === 'icons' || !defs.achievements.some(a => a.description))) { const texts = portTrophyTexts(game.path); if (texts) { defs.achievements = defs.achievements.map(a => { const t = texts.get(Number(a.id)); return t ? {...a, title: t.title || a.title, description: t.description || a.description} : a; }); detail = detail === 'icons' ? 'port' : detail; sourceLanguage = texts.language || 'en'; } }
+ // Troféus que o próprio port guardou (trophies.dat, gamedata/trophies/*.json, progress_user*.txt): entram no progresso
+ // com a data gravada pelo port (ou a do arquivo).
+ if (game.path) for (const {file, kind} of portProgressFiles(game.path)) for (const t of readProgressFile(file, kind)) store.record(game.uuid || game.id, t.id, t.at);
  const state = store.get(game.uuid || game.id), unlocked = state.unlocked || {};
  const achievements = defs.achievements.map(a => ({id: String(a.id), title: a.title, description: a.description, grade: a.grade, hidden: !!a.hidden, icon: a.icon, globalPercent: a.globalPercent ?? null, unlocked: !!unlocked[String(Number(a.id))], date: unlocked[String(Number(a.id))] || null, manual: !!state.manual?.[String(Number(a.id))]}));
  // Platina: quando todos os outros estão completos (o port não calcula).
@@ -177,12 +271,24 @@ export function readPortTrophies(game, port, {config = {}, dataDir, store, env =
 }
 
 // Arquivos de log de um port: last_run.log (SpartanPort; pasta "user" ou a definida em settings.json) e *.log da pasta.
-export function portLogFiles(exe) {
+export function portLogFiles(exe, {extra = []} = {}) {
  const dir = path.dirname(exe), out = [], add = f => { if (f && !out.includes(f)) out.push(f); };
- for (const cfg of [path.join(dir, 'settings.json'), path.join(dir, 'user', 'settings.json')]) { const j = json(cfg, null); if (j?.user_dir) add(path.join(String(j.user_dir), 'last_run.log')); }
- add(path.join(dir, 'user', 'last_run.log')); add(path.join(dir, 'last_run.log'));
- for (const d of [dir, path.join(dir, 'user'), path.join(dir, 'logs'), path.join(dir, 'log')]) for (const e of list(d).slice(0, 200)) if (e.isFile() && /\.(log|txt)$/i.test(e.name) && /log|run|output|console/i.test(e.name)) add(path.join(d, e.name));
- return out.slice(0, 12);
+ for (const f of extra) add(f);
+ for (const u of portUserDirs(exe)) add(path.join(u, 'last_run.log'));
+ add(path.join(dir, 'last_run.log'));
+ // Pastas de log dos ports (gr2_pc: out/logs e out/last_run.log; Unicorn Overlord: data/logs). Dos run-*.log, só os
+ // mais novos (um por sessão).
+ const dirs = [dir, path.join(dir, 'user'), path.join(dir, 'logs'), path.join(dir, 'log'), path.join(dir, 'out'), path.join(dir, 'out', 'logs'), path.join(dir, 'data', 'logs'), path.join(dir, 'user', 'logs')];
+ const runs = [];
+ for (const d of dirs) for (const e of list(d).slice(0, 300)) {
+  if (!e.isFile() || !/\.(log|txt)$/i.test(e.name) || !/log|run|output|console/i.test(e.name)) continue;
+  const f = path.join(d, e.name);
+  if (/^run[-_]/i.test(e.name)) { try { runs.push({f, t: fs.statSync(f).mtimeMs}); } catch {} } else add(f);
+ }
+ for (const r of runs.sort((a, b) => b.t - a.t).slice(0, 3)) add(r.f);
+ for (const f of portTrophyLogs(exe)) add(f);
+ for (const p of portProgressFiles(exe)) add(p.file);
+ return out.slice(0, 20);
 }
 
 // Acompanha os logs dos ports. onUnlock(game, trophyId, {live}), live=false para linhas antigas (o jogo rodou com
@@ -195,6 +301,19 @@ export class PortLogWatcher {
   let pairs = []; try { pairs = this.games(); } catch {}
   for (const {game, file} of pairs) {
    let st; try { st = fs.statSync(file); } catch { continue; }
+   // Arquivos de progresso (trophies.dat, gamedata/trophies/*.json, progress_user*.txt): troféus novos = os que não
+   // estavam na leitura anterior.
+   const kind = progressKind(file);
+   if (kind) {
+    const prev = this.offsets.get(file); if (prev && prev.mtime === st.mtimeMs && prev.size === st.size) continue;
+    const ids = readProgressFile(file, kind).map(t => t.id);
+    // Arquivo sendo regravado (vazio ou JSON pela metade): tenta de novo no próximo ciclo.
+    if (!ids.length && prev?.ids?.length) continue;
+    const live = st.mtimeMs >= this.startedAt - 5000, before = new Set(prev?.ids || []);
+    for (const id of ids) if (!before.has(id)) { try { this.onUnlock(game, id, {live: live && !!prev}); } catch {} }
+    this.offsets.set(file, {mtime: st.mtimeMs, size: st.size, ids});
+    continue;
+   }
    const known = this.offsets.get(file);
    let from = known?.offset ?? 0;
    // O launcher recria o log a cada sessão: arquivo menor ou mais novo que o lido = começa do início.
@@ -208,7 +327,7 @@ export class PortLogWatcher {
     // Só linhas completas.
     const cut = text.lastIndexOf('\n'); if (cut < 0 && st.size - from < 4096) { this.offsets.set(file, {offset: from, mtime: st.mtimeMs, birth: st.birthtimeMs, head: st.size >= 256 ? head : ''}); continue; }
     const usable = cut >= 0 ? text.slice(0, cut + 1) : text;
-    for (const id of parsePortTrophyLines(usable)) { try { this.onUnlock(game, id, {live}); } catch {} }
+    for (const id of parsePortTrophyLines(usable, {trophyLog: /(^|[\\/])trophies\.log$/i.test(file)})) { try { this.onUnlock(game, id, {live}); } catch {} }
     this.offsets.set(file, {offset: from + Buffer.byteLength(usable), mtime: st.mtimeMs, birth: st.birthtimeMs, head: st.size >= 256 ? head : ''});
    } else this.offsets.set(file, {offset: st.size, mtime: st.mtimeMs, birth: st.birthtimeMs, head: st.size >= 256 ? head : ''});
   }

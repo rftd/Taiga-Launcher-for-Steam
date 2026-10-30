@@ -126,6 +126,7 @@ Jede Freischaltung erscheint mit der **nativen Steam-Erfolgsbenachrichtigung**, 
 - **Startet mit Windows**, minimiert im Infobereich, damit Steam immer die angepassten Seiten zeigt.
 - **Aktualisiert sich selbst** mit einem Klick.
 - **Bearbeite die Grafiken deiner anderen Steam-Spiele** im Tab Steam-Bibliothek.
+- **Nicht installierte Store-Spiele**: Deine Epic- und Xbox-Spiele erscheinen in Steam mit einer **Installieren**-Schaltfläche. Epic-Spiele werden mit Fortschritt und Abbrechen direkt auf der Steam-Seite geladen (über Legendary); Xbox-Spiele öffnen sich in der Xbox-App. Auf Wunsch eigene Sammlungen pro Store („Epic Games", „Xbox").
 - **An anderen PC senden**: erstellt ein Paket mit dem Programm, ohne deine Spiele, Konten oder Anmeldungen.
 - **Alles aus Steam entfernen** mit einem Klick. Deine Spiele und Spielstände werden nie angerührt.
 
@@ -187,7 +188,7 @@ Nutze **Problem melden** im Seitenmenü oder eröffne ein [Issue](https://github
 
 Taiga Launcher ist kostenlos. Wenn es deine Bibliothek besser gemacht hat, kannst du helfen, dass es weiter wächst:
 
-<a href="https://github.com/sponsors/GabrielTaiga"><img src="https://img.shields.io/badge/Auf%20GitHub%20unterst%C3%BCtzen-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="Auf GitHub unterstützen"></a>
+<a href="https://ko-fi.com/gabrieltaiga"><img src="https://img.shields.io/badge/Auf%20Ko--fi%20unterst%C3%BCtzen-FF5E5B?style=for-the-badge&logo=kofi&logoColor=white" alt="Auf Ko-fi unterstützen"></a> <a href="https://github.com/sponsors/GabrielTaiga"><img src="https://img.shields.io/badge/Auf%20GitHub%20unterst%C3%BCtzen-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="Auf GitHub unterstützen"></a>
 
 Ein Stern ⭐ für das Repository hilft auch sehr.
 
@@ -198,6 +199,7 @@ Ein Stern ⭐ für das Repository hilft auch sehr.
 Erstellt von **Taiga ([GabrielTaiga](https://github.com/GabrielTaiga))**.
 
 - **NativeGameLink for Steam** von David Miranda (Davidjarod11, MIT): die Grundlage der Spielseite in Steam.
+- **Legendary** (legendary-gl, GPL-3.0): installiert Epic-Spiele. Wird nur geladen, wenn du eines installierst, als separates Programm.
 - **Electron** und **Chromium**: die Basis des Programms.
 - **QR Code Generator** von Kazuhiko Arase (MIT) sowie die Schriften **Manrope** und **Sora** (SIL OFL).
 - Daten von **SteamGridDB, IGDB, RetroAchievements, libretro, Wikipedia / Wikidata, PCGamingWiki, Exophase** und dem **Steam-Shop**.

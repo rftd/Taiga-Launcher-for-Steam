@@ -306,4 +306,8 @@ export const TAIGA_PT: Record<string, string> = {
 	steamgriddb_api_key_restored: 'A chave padrão foi restaurada e verificada.',
 	steamgriddb_api_key_saved: 'A chave do SteamGridDB foi salva e verificada.',
 	steamgriddb_api_key_restore: 'Restaurar chave padrão',
+	taiga_ach_xbox_login: 'Entre com a sua conta Microsoft no Taiga Launcher (Contas) para ver as conquistas do Xbox deste jogo.',
+	taiga_ach_login: 'Conecte a conta da loja no Taiga Launcher (Contas) para ver as conquistas deste jogo.',
+	taiga_ach_unmapped: 'As conquistas deste jogo ainda não apareceram na sua conta. Abra o jogo uma vez e tente de novo.',
+	taiga_ach_offline: 'Não foi possível carregar as conquistas agora. Tente de novo em instantes.',
 };

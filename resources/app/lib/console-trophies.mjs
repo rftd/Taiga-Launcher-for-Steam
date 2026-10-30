@@ -110,8 +110,11 @@ export function readShadPS4(game, config, dataDir) {
  const language = config.language || 'pt-BR', opts = game.achievementSettings || {}, PS4_LANG = {'pt-BR': 17, en: 1, es: 3, fr: 2, de: 4};
  const wanted = opts.trophySet ? [opts.trophySet] : ps4SetsForGame(game);
  for (const root of shadps4Roots(config)) {
-  for (const set of wanted) {
-   const folder = path.join(root, 'trophy', set, 'Xml');
+  // Versões novas do shadPS4 guardam os troféus por jogo: user/game_data/<CUSA...>/TrophyFiles/trophy00/Xml.
+  const tid = String(game.discId || game.serial || '').toUpperCase().replace(/[^A-Z0-9]/g, '').match(/[A-Z]{4}\d{5}/)?.[0] || String(game.path || '').toUpperCase().match(/\b(CUSA|PPSA)\d{5}\b/)?.[0] || '';
+  const spots = wanted.map(set => ({set, folder: path.join(root, 'trophy', set, 'Xml'), icons: path.join(root, 'trophy', set, 'Icons')}));
+  if (tid) for (const base of [path.join(root, 'game_data', tid, 'TrophyFiles'), path.join(root, 'user', 'game_data', tid, 'TrophyFiles')]) for (const t of list(base)) { const name = t.name || t; spots.push({set: wanted[0] || tid, folder: path.join(base, name, 'Xml'), icons: path.join(base, name, 'Icons')}); }
+  for (const {set, folder, icons: iconsDir} of spots) {
    if (!dir(folder)) continue;
    let def = null, sourceLanguage = 'en';
    for (const name of [`TROP_${String(PS4_LANG[language] ?? 1).padStart(2, '0')}.XML`, 'TROP.XML']) { const f = path.join(folder, name); if (present(f)) try { def = parseTrophyXML(read(f)); if (name.startsWith('TROP_') && language !== 'en') sourceLanguage = language; break; } catch {} }
@@ -120,7 +123,7 @@ export function readShadPS4(game, config, dataDir) {
    const master = path.join(folder, 'TROP.XML');
    let unlocks = present(master) ? parsePS4Unlocks(read(master).toString('utf8')) : new Map(), known = unlocks.size > 0;
    for (const user of list(path.join(root, 'home'))) { const f = path.join(root, 'home', user, 'trophy', set + '.xml'); if (present(f)) { unlocks = parsePS4Unlocks(read(f).toString('utf8')); known = true; break; } }
-   const icons = path.join(root, 'trophy', set, 'Icons');
+   const icons = iconsDir;
    const achievements = def.achievements.map(a => { const id = Number(a.id); return {...a, unlocked: unlocks.has(id), date: unlocks.get(id) || null, icon: icon(dataDir, path.join(icons, 'TROP' + String(id).padStart(3, '0') + '.PNG'))}; });
    return {status: 'ok', provider: 'shadps4', source: 'shadPS4', sourceLanguage, progressKnown: known, achievements, total: achievements.length, unlocked: achievements.filter(a => a.unlocked).length, trophySet: set};
   }

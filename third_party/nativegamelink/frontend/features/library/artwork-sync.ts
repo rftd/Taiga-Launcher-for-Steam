@@ -10,6 +10,16 @@ let priorityShortcutId: number | null = null;
 const priorityArtworkInFlight = new Set<string>();
 const verifiedShortcuts = new Set<string>();
 
+// Muitos jogos novos de uma vez: entre um jogo e outro, espera a Steam ficar ociosa (ou 150 ms), para a interface não
+// travar enquanto as artes são gravadas.
+function breathe(): Promise<void> {
+	return new Promise(resolve => {
+		const idle = (globalThis as any).requestIdleCallback as ((cb: () => void, opts?: { timeout: number }) => number) | undefined;
+		if (typeof idle === 'function') idle(() => resolve(), { timeout: 600 });
+		else setTimeout(resolve, 150);
+	});
+}
+
 export function invalidateShortcutArtworkVerification(shortcutId?: number): void {
 	if (shortcutId != null) {
 		for (const key of Array.from(verifiedShortcuts)) {
@@ -76,9 +86,14 @@ export async function syncMissingArtworkForMappedShortcuts(): Promise<void> {
 				shortcuts.unshift(item);
 			}
 		}
+		let worked = false;
 		for (const shortcut of shortcuts) {
 			const steamAppId = String(shortcut.steamAppId || '').trim();
 			if (!steamAppId || !/^\d+$/.test(steamAppId)) continue;
+			if (worked) { worked = false; await breathe(); }
+			const key = `${shortcut.id}:${steamAppId}`;
+			if (verifiedShortcuts.has(key) && artworkAlreadySaved(shortcut.id, steamAppId)) continue;
+			worked = true;
 			if (!artworkAlreadySaved(shortcut.id, steamAppId)) {
 				const title = shortcut.title || '';
 				try {
@@ -95,6 +110,7 @@ export async function syncMissingArtworkForMappedShortcuts(): Promise<void> {
 			}
 			try { await applyOfficialShortcutIcon(shortcut.id, steamAppId, false); }
 			catch (error) { backendLog(`Sync missing icon failed for ${shortcut.id}: ${error}`); }
+			if (artworkAlreadySaved(shortcut.id, steamAppId) && isLogoPositionVerified(shortcut.id, steamAppId) && shortcutIconMarkerMatches(shortcut.id, steamAppId)) verifiedShortcuts.add(key);
 		}
 	} finally {
 		syncArtworkInProgress = false;

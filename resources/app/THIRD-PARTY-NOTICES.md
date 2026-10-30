@@ -15,6 +15,15 @@ Cada um continua sob a sua própria licença.
 | QR Code Generator, Kazuhiko Arase | `web/qrcode.js` (QR Code do PIX) | MIT, `licenses/qrcode-generator-MIT.txt` |
 | Manrope e Sora | `web/fonts` | SIL Open Font License 1.1, arquivos `*-OFL.txt` |
 
+## Programa baixado sob demanda
+
+| Componente | Onde | Licença |
+|---|---|---|
+| Legendary 0.21.1 ([legendary-gl/legendary](https://github.com/legendary-gl/legendary)) | baixado do GitHub na primeira instalação de um jogo da Epic, em `%LOCALAPPDATA%\Taiga Launcher\tools\legendary` (conferido pelo SHA-256 publicado) | GPL-3.0 |
+
+O Legendary roda como um programa separado e não faz parte do código do Taiga Launcher. O código-fonte está no
+repositório acima. Ele só é baixado quando o usuário instala um jogo da Epic pelo Taiga Launcher.
+
 A página do jogo dentro da Steam é o NativeGameLink for Steam com alterações do Taiga Launcher (marcadas no código).
 
 ## Agradecimentos e projetos de referência
@@ -24,6 +33,7 @@ ser o que está na tabela acima). Obrigado aos autores:
 
 - **Millennium**, Project Millennium ([SteamClientHomebrew/Millennium](https://github.com/SteamClientHomebrew/Millennium), MIT): integração com a Steam pela porta de depuração do CEF.
 - **SFP**, Chris Yeninas / PhantomGamers ([PhantomGamers/SFP](https://github.com/PhantomGamers/SFP), MIT): argumentos de abertura da Steam e injeção de scripts.
+- **Playnite** ([JosefNemec/PlayniteExtensions](https://github.com/JosefNemec/PlayniteExtensions), MIT) e **Heroic Games Launcher** ([Heroic-Games-Launcher](https://github.com/Heroic-Games-Launcher/HeroicGamesLauncher), GPL-3.0): como reconhecer jogos do Xbox pelo registro de pacotes do Windows e como instalar jogos da Epic com o Legendary.
 - **BoilR**, PhilipK ([PhilipK/BoilR](https://github.com/PhilipK/BoilR), MIT / Apache-2.0): importação de jogos de outras lojas para a Steam.
 - **Playhub Metadata**, LoZazaMastro ([LoZazaMastro/Playhub-Metadata](https://github.com/LoZazaMastro/Playhub-Metadata)): dados e artes para jogos fora da Steam.
 - **Steam Achievement Notifier** ([SteamAchievementNotifier/SteamAchievementNotifier](https://github.com/SteamAchievementNotifier/SteamAchievementNotifier)): notificações de conquistas.

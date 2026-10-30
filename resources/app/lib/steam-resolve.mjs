@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {appIdFromFolder, isGameFolder} from './steam-appid-proof.mjs';
-import {normalizeTitle} from './title-match.mjs';
+import {normalizeTitle, editionBase} from './title-match.mjs';
 
 const W = {proof: 100, store: 90, wikidata: 80, pcgamingwiki: 80, igdb: 70, sgdb: 60, steam: 60, saves: 40};
 const NAMES = {proof: 'arquivo do jogo', store: 'ID da loja', wikidata: 'Wikidata', pcgamingwiki: 'PCGamingWiki', igdb: 'IGDB', sgdb: 'SteamGridDB', steam: 'busca da Steam', saves: 'progresso salvo'};
@@ -78,7 +78,9 @@ async function fromSGDB(titles, providers) {
 // Decisão final. sources: injeção para testes ({wikidata, pcgamingwiki, igdb, sgdb, store, steam}: async () => [ids]).
 export async function resolveSteamAppId(game, {providers = {}, steamLink = null, storeLookup = null, env = process.env, log = () => {}, sources = null, verify = null, local = true, useSaves = true} = {}) {
  const title = String(game.title || '').replace(/[™®©]/g, '').trim();
- const titles = [...new Set([title, game.wikiEnTitle, game.storeName, game.store?.title].filter(Boolean).map(t => String(t).replace(/[™®©]/g, '').trim()))];
+ const base = [...new Set([game.storeTitleEn, title, game.wikiEnTitle, game.storeName, game.store?.title].filter(Boolean).map(t => String(t).replace(/[™®©]/g, '').trim()))];
+ // Também o nome sem o sufixo de edição da loja ("Rise of the Tomb Raider: 20 Year Celebration" → "Rise of the Tomb Raider").
+ const titles = [...new Set([...base, ...base.map(editionBase)])];
  if (local) { const proof = localSteamProof(game); if (proof && proof.appId !== 480) { log(`AppID ${proof.appId} pelo arquivo ${proof.source}.`); return {appId: proof.appId, confident: true, via: ['proof'], detail: proof.source, candidates: []}; } }
  const ask = sources || {
   store: async () => { if (!storeLookup || !game.store) return []; const r = await storeLookup(game); return r?.appId ? [r.appId] : []; },
@@ -86,7 +88,7 @@ export async function resolveSteamAppId(game, {providers = {}, steamLink = null,
   pcgamingwiki: () => titles.length ? fromPCGamingWiki(titles, providers) : [],
   igdb: () => titles.length ? fromIGDB(titles, providers) : [],
   sgdb: () => titles.length ? fromSGDB(titles, providers) : [],
-  steam: async () => { if (!steamLink || !titles.length) return []; const found = await steamLink.search(titles[0]); const exact = (found.items || []).filter(i => titles.some(t => key(t) === key(i.name))); return exact.length === 1 ? [exact[0].appId] : []; },
+  steam: async () => { if (!steamLink || !titles.length) return []; for (const q of [...new Set([titles[0], editionBase(titles[0])])]) { const found = await steamLink.search(q); const exact = (found.items || []).filter(i => titles.some(t => key(t) === key(i.name))); if (exact.length === 1) return [exact[0].appId]; } return []; },
  };
  const votes = new Map(), add = (id, src) => { const v = votes.get(id) || {appId: id, score: 0, via: []}; if (v.via.includes(src)) return; v.score += W[src]; v.via.push(src); votes.set(id, v); };
  await Promise.all(Object.entries(ask).map(async ([src, fn]) => { try { const list = [...new Set(await fn())]; for (const id of list) add(id, src); if (list.length) log(`${NAMES[src]}: ${list.join(', ')}`); } catch (e) { log(`${NAMES[src]}: ${e.message}`); } }));
@@ -104,6 +106,8 @@ export async function resolveSteamAppId(game, {providers = {}, steamLink = null,
  // Outro AppID apontado por um banco com ID (não só pelo nome) é conflito, a menos que a diferença seja grande.
  const DB = ['store', 'wikidata', 'pcgamingwiki', 'igdb', 'sgdb'];
  const clear = !second || top.score - second.score >= 80 || (!second.via.some(s => DB.includes(s)) && (second.score < top.score || tieBroken));
- const confident = clear && (top.score >= 140 || (independent >= 1 && top.exactName && top.score >= 80) || (top.via.includes('store') && top.score >= 90));
+ // Jogos da Epic quase sempre existem na Steam: nome idêntico a um único jogo base já basta, sem perguntar.
+ const epic = game.store?.name === 'epic' || game.store?.label === 'Epic Games';
+ const confident = clear && (top.score >= 140 || (epic && top.exactName && top.score >= 60) || (independent >= 1 && top.exactName && top.score >= 80) || (top.via.includes('store') && top.score >= 90));
  return {appId: confident ? top.appId : null, confident, via: top.via, name: top.name, candidates: list.map(v => ({appId: v.appId, title: v.name, score: Math.min(1, v.score / 200), via: v.via}))};
 }

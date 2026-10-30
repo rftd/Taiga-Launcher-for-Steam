@@ -41,7 +41,9 @@ export async function writeZip(out, entries, {onProgress = () => {}} = {}) {
 }
 
 // Arquivos da instalação que vão no pacote. Fica de fora o que é só de desenvolvimento ou pessoal.
-const SKIP = [/^\.git(\/|$)/, /^docs\//, /^dist\//, /^node_modules\//, /^\.gitignore$/, /^third_party\//, /^tools\//, /^resources\/app\/tests\//, /^resources\/app\/tools\//, /^resources\/app\/chaves\.json$/, /^resources\/app\/REVISAO-[\d.]+\.md$/, /^resources\/app\/LEIA-ME[^/]*$/i, /(^|\/)README[^/]*$/i, /^MANUAL\.md$/i, /^resources\/app\/Iniciar\.bat$/i, /(^|\/)\.(github|vscode|idea)(\/|$)/i, /\.part$/, /(^|\/)Thumbs\.db$/i, /(^|\/)desktop\.ini$/i];
+const SKIP = [/^\.git(\/|$)/, /^docs\//, /^dist\//, /^node_modules\//, /^\.gitignore$/, /^third_party\//, /^tools\//, /^resources\/app\/tests\//, /^resources\/app\/tools\//, /^resources\/app\/chaves\.json$/, /^resources\/app\/REVISAO-[\d.]+\.md$/, /^resources\/app\/LEIA-ME[^/]*$/i, /(^|\/)README[^/]*$/i, /^MANUAL\.md$/i, /^resources\/app\/Iniciar\.bat$/i, /(^|\/)\.(github|vscode|idea)(\/|$)/i, /\.part$/, /(^|\/)Thumbs\.db$/i, /(^|\/)desktop\.ini$/i,
+ // Compiladores de shader do WebGPU (o programa não usa WebGPU): 27 MB a menos no pacote.
+ /^dxcompiler\.dll$/i, /^dxil\.dll$/i];
 export function packageFiles(installDir) {
  const out = [];
  const walk = (dir, rel) => {

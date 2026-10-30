@@ -98,3 +98,14 @@ export function confidentChoice(scored, {min = .9, gap = .08} = {}) {
  if (list[1] && list[1].exact && list[0].exact && list[1].score >= list[0].score - .01) return null;
  return list[0];
 }
+
+// Nome do jogo sem o sufixo de edição da loja ("20 Year Celebration", "Definitive Edition", "GOTY"...): na Steam e nos
+// bancos de dados o mesmo jogo costuma estar com o nome base. Devolve o próprio nome quando não há sufixo de edição.
+const EDITION_WORDS = "(?:(?:the\\s+)?(?:\\d+(?:st|nd|rd|th)?\\s+)?(?:anniversary|year|years|celebration|edition|goty|game of the year|deluxe|definitive|complete|ultimate|gold|premium|platinum|digital|standard|collector'?s|director'?s cut|special|legendary|enhanced edition|bundle|pack|launch)(?:\\s+(?:anniversary|year|years|celebration|edition|of the year|cut|bundle|pack))*)";
+const EDITION_SUFFIX = new RegExp('\\s*(?:[:\\-\u2013(]\\s*)' + EDITION_WORDS + '[\\s)]*$', 'i');
+const EDITION_TAIL = new RegExp('\\s+(?:\\d+\\s+years?\\s+celebration|(?:goty|game of the year|definitive|deluxe|complete|ultimate|gold|premium|anniversary|digital deluxe|collector\'?s)\\s+edition|goty)\\s*$', 'i');
+export function editionBase(value) {
+ let t = String(value || '').replace(/[™®©]/g, '').trim(), prev;
+ do { prev = t; t = t.replace(EDITION_SUFFIX, '').replace(EDITION_TAIL, '').trim(); } while (t !== prev && t.length > 2);
+ return t.length > 2 ? t : String(value || '').trim();
+}

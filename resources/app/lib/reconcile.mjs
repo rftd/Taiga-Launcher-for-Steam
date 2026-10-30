@@ -1,7 +1,7 @@
 import {windowsPath} from './vdf.mjs';
 import fs from 'node:fs';import path from 'node:path';
 const exists=file=>{try{return fs.statSync(file).isFile();}catch{return false;}};
-export function relocationMatches(game,item){if(game.demo||exists(game.path)||(game.profile||'psp')!==item.profile||game.bytes!==item.bytes)return false;if(game.fingerprint)return game.fingerprint===item.fingerprint&&(item.fingerprintKind==='full'||path.basename(game.path).toLowerCase()===path.basename(item.path).toLowerCase());return !!game.discId&&game.discId===item.discId;}
+export function relocationMatches(game,item){if(game.demo||game.notInstalled||exists(game.path)||(game.profile||'psp')!==item.profile||game.bytes!==item.bytes)return false;if(game.fingerprint)return game.fingerprint===item.fingerprint&&(item.fingerprintKind==='full'||path.basename(game.path).toLowerCase()===path.basename(item.path).toLowerCase());return !!game.discId&&game.discId===item.discId;}
 export function reconcile(games,items){const moved=[],changed=[],pending=[];
  for(const item of items){const existing=games.find(g=>!g.demo&&windowsPath(g.path)===windowsPath(item.path));if(existing){const different=existing.bytes!==item.bytes||existing.mtime!==item.mtime||existing.fingerprint&&existing.fingerprint!==item.fingerprint;existing.fingerprint=item.fingerprint;existing.fingerprintKind=item.fingerprintKind;if(different){existing.bytes=item.bytes;existing.mtime=item.mtime;existing.discId=item.discId;changed.push(existing.id);}continue;}pending.push(item);}
  const matches=new Map(pending.map(item=>[item,games.filter(g=>relocationMatches(g,item))])),counts=new Map();for(const list of matches.values())for(const g of list)counts.set(g,(counts.get(g)||0)+1);const added=[];

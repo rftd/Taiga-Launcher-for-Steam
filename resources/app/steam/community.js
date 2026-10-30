@@ -50,11 +50,20 @@
  // ── dados e perfil ──
  // Os dados ficam guardados no navegador: ao abrir a página, os números e cartões aparecem na hora e são
  // conferidos com o Taiga Launcher logo em seguida.
- const CACHE = 'taiga-community-cache-v1';
+ // Guardado sem os ícones das conquistas (que são imagens): fica pequeno, cabe sempre no navegador e abre na hora.
+ const CACHE = 'taiga-community-cache-v2';
  let DATA = null, dataAt = 0, refreshing = null;
+ try { localStorage.removeItem('taiga-community-cache-v1'); } catch (e) {}
  try { const c = JSON.parse(localStorage.getItem(CACHE) || 'null'); if (c && Array.isArray(c.games)) { DATA = c; setLang(c.language); } } catch (e) {}
+ function slim(d) { return {...d, pendingIcons: undefined, games: (d.games || []).map(g => ({...g, achievements: {...g.achievements, recentIcons: []}}))}; }
  function refresh() {
-  if (!refreshing) refreshing = call('community_games').then(d => { const changed = JSON.stringify(d) !== JSON.stringify(DATA); DATA = d; dataAt = Date.now(); setLang(d.language); try { localStorage.setItem(CACHE, JSON.stringify(d)); } catch (e) {} if (changed) schedule(0); return d; }).finally(() => { refreshing = null; });
+  if (!refreshing) refreshing = call('community_games').then(d => {
+   // A assinatura vem pronta do Taiga Launcher: sem comparar a lista inteira a cada atualização.
+   const changed = !DATA || !d.sig || d.sig !== DATA.sig || DATA.slim; DATA = d; dataAt = Date.now(); setLang(d.language);
+   if (changed) { try { localStorage.setItem(CACHE, JSON.stringify({...slim(d), slim: true})); } catch (e) {} schedule(0); }
+   if (d && d.pendingIcons && !STATE.iconRetry) { STATE.iconRetry = setTimeout(() => { STATE.iconRetry = null; refresh().catch(() => {}); }, 2500); }
+   return d;
+  }).finally(() => { refreshing = null; });
   return refreshing;
  }
  async function data(force) {
@@ -67,14 +76,13 @@
  async function profileSteamId() {
   const m = location.pathname.match(/^\/(id|profiles)\/([^/?#]+)/); if (!m) return '';
   if (m[1] === 'profiles') return /^\d{17}$/.test(m[2]) ? m[2] : '';
-  if (!STATE.pageSid && route() === 'profile') { for (const sc of document.scripts) { const p = (sc.textContent || '').match(/g_rgProfileData\s*=\s*\{[^]*?"steamid"\s*:\s*"(\d{17})"/); if (p) { STATE.pageSid = p[1]; break; } } }
-  if (STATE.pageSid) return STATE.pageSid;
-  const key = 'taiga-vanity:' + m[2].toLowerCase(); let sid = '';
-  try { sid = localStorage.getItem(key) || ''; } catch (e) {}
-  if (!sid) {
-   try { const t = await (await fetch('/id/' + encodeURIComponent(m[2]) + '/?xml=1', {credentials: 'include'})).text(); sid = (t.match(/<steamID64>(\d{17})<\/steamID64>/) || [])[1] || ''; } catch (e) {}
-   if (sid) try { localStorage.setItem(key, sid); } catch (e) {}
-  }
+  const key = 'taiga-vanity:' + m[2].toLowerCase();
+  if (STATE.pageSidFor === key && STATE.pageSid) return STATE.pageSid;
+  // 1) já conhecido (na hora); 2) dados do próprio perfil na página; 3) só com a página carregada, pergunta à Steam.
+  let sid = ''; try { sid = localStorage.getItem(key) || ''; } catch (e) {}
+  if (!sid && route() === 'profile') { for (const sc of document.scripts) { const p = (sc.textContent || '').match(/g_rgProfileData\s*=\s*\{[^]*?"steamid"\s*:\s*"(\d{17})"/); if (p) { sid = p[1]; break; } } }
+  if (!sid && document.readyState !== 'loading') { try { const t = await (await fetch('/id/' + encodeURIComponent(m[2]) + '/?xml=1', {credentials: 'include'})).text(); sid = (t.match(/<steamID64>(\d{17})<\/steamID64>/) || [])[1] || ''; } catch (e) {} }
+  if (sid) { STATE.pageSid = sid; STATE.pageSidFor = key; try { localStorage.setItem(key, sid); } catch (e) {} }
   return sid;
  }
  // Perfil de um amigo que também usa o Taiga Launcher (só existe com um servidor de perfis configurado).
@@ -94,10 +102,17 @@
  const hashUuid = () => { const h = decodeURIComponent(location.hash.slice(1)); return h.startsWith(HASH) ? h.slice(HASH.length) : ''; };
  const hashHref = uuid => location.pathname + location.search + '#' + HASH + encodeURIComponent(uuid);
  // Jogos que você já tem na própria Steam não aparecem duas vezes.
+ // Os AppIDs da página são lidos uma vez (dados da Steam + links), em vez de uma busca no texto inteiro por jogo.
  function ownedOnSteam(appId) {
   if (!appId) return false;
-  if (!STATE.loader) { try { STATE.loader = JSON.stringify(window.SSR && window.SSR.loaderData || {}); } catch (e) { STATE.loader = ''; } }
-  return new RegExp('(?:"appid"\\s*:\\s*"?|/app/)' + appId + '\\b').test(STATE.loader) || !!document.querySelector('a[href*="/app/' + appId + '"]:not([data-taiga] a)');
+  // Dados da Steam (SSR): lidos uma vez por endereço. Links da página: no máximo a cada 1 s.
+  if (!STATE.loader) { let text = ''; try { text = JSON.stringify(window.SSR && window.SSR.loaderData || {}); } catch (e) {} const base = new Set(); const re = /(?:"appid"\s*:\s*"?|\/app\/)(\d+)/g; let m; while ((m = re.exec(text))) base.add(m[1]); STATE.loader = base; STATE.owned = null; }
+  if (!STATE.owned || Date.now() - STATE.ownedAt > 1000) {
+   const set = new Set(STATE.loader);
+   document.querySelectorAll('a[href*="/app/"]').forEach(a => { if (a.closest('[data-taiga]')) return; const x = (a.getAttribute('href') || '').match(/\/app\/(\d+)/); if (x) set.add(x[1]); });
+   STATE.owned = set; STATE.ownedAt = Date.now();
+  }
+  return STATE.owned.has(String(appId));
  }
  function visibleGames(d) { return (d.games || []).filter(g => !(g.steamAppId && ownedOnSteam(g.steamAppId))); }
 
@@ -521,13 +536,19 @@
 
  // ── ciclo ──
  let timer = null, busy = false, again = false;
- function schedule(ms) { clearTimeout(timer); timer = setTimeout(apply, ms === undefined ? 120 : ms); }
+ // Agenda sem adiar sem fim: enquanto a Steam monta a página chegam mudanças o tempo todo, e um "espera parar de
+ // mudar" atrasava o número de jogos até o fim do carregamento. Um pedido já marcado só é antecipado, nunca adiado.
+ let dueAt = 0;
+ function schedule(ms) { const wait = ms === undefined ? 120 : ms, at = Date.now() + wait; if (timer && dueAt <= at) return; clearTimeout(timer); dueAt = at; timer = setTimeout(() => { timer = null; apply(); }, wait); }
  async function apply() {
   if (busy) { again = true; return; } busy = true;
   try {
    const r = route(); if (!r) { closeAchievements(); return; }
    // Antes do fim do HTML não dá para saber se a página é montada pelo React (SSR); mexer antes da hidratação faria a Steam redesenhar tudo.
-   if (!document.body || document.readyState === 'loading' || document.getElementById('valve-ssr-data') || (window.SSR && !window.SSR.hydrated)) { schedule(40); return; }
+   const ssr = !!(document.getElementById('valve-ssr-data') || (window.SSR && !window.SSR.hydrated));
+   // Perfil (página clássica, sem React): o número de jogos é trocado assim que aparece, mesmo com a página ainda carregando.
+   const early = r === 'profile' && !ssr && document.body && document.querySelector('.profile_count_link_total');
+   if (!early && (!document.body || document.readyState === 'loading' || ssr)) { schedule(40); return; }
    const sid = await profileSteamId(); if (!sid) return;
    const mine = await data(); let d;
    if (mine.steamId && sid === mine.steamId) { d = mine; STATE.friend = null; }
