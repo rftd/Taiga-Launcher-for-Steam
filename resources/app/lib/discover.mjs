@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const ROM_FOLDERS = ['Roms', 'ROMs', 'roms', 'ROMS', 'Emulation\\roms', 'Emulation\\ROMs', 'RetroBat\\roms', 'Jogos\\Roms', 'Games\\Roms', 'Games\\ROMs', 'Emuladores\\Roms', 'Emuladores\\Jogos', 'Emulators\\Roms', 'Emulators\\Games', 'ISOs', 'Isos', 'PS2\\ISOs', 'PSP\\ISO', 'Jogos PSP', 'Jogos PS2', 'Jogos PS1'];
-const HOME_FOLDERS = ['roms','Roms', 'ROMs', 'Emulation\\roms', 'Documents\\Roms', 'Documents\\ROMs', 'Documents\\ISOs', 'Documentos\\Roms', 'Games\\Roms', 'Jogos\\Roms'];
+const HOME_FOLDERS = ['Roms', 'ROMs', 'roms', 'Emulation\\roms', 'Documents\\Roms', 'Documents\\ROMs', 'Documents\\ISOs', 'Documentos\\Roms', 'Games\\Roms', 'Jogos\\Roms'];
 // Pastas comuns de jogos de PC instalados fora de lojas: cada subpasta é tratada como um jogo separado.
 const PC_FOLDERS = ['Games', 'Jogos', 'Juegos', 'Spiele', 'Jeux'];
 const SKIP = /^(windows|program files( \(x86\))?|programdata|\$recycle\.bin|system volume information|steamlibrary|steamapps|appdata|recovery|perflogs|msocache)$/i;
