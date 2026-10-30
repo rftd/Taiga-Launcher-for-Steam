@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';import os from 'node:os';import path from 'node:path';
 import {emulatorGameFolders,discoverGameFolders} from '../lib/discover.mjs';
-import {discoverEmulators} from '../lib/emulator-registry.mjs';
+import {discoverEmulators,applyDiscovery,defaultDiscoveryRoots} from '../lib/emulator-registry.mjs';
 import {discoverFlatpakEmulators} from '../lib/flatpak-emulators.mjs';
 import {AchievementProviderManager} from '../lib/achievement-manager.mjs';
 import {raLogCandidates} from '../lib/ra-log.mjs';
@@ -49,4 +49,16 @@ test('Automatic discovery endpoint finds ROMs from a Flatpak playlist without ma
 
 test('Achievement errors remain visible and escape markup',async()=>{
  const {default:view}=await import('../web/achievement-view.cjs');const html=view.rows({status:'unavailable',provider:'retroachievements',achievements:[],message:'RA <network> failed'},{T:key=>key,language:'en'});assert.match(html,/RA &lt;network&gt; failed/);assert.ok(!html.includes('<network>'));
+});
+
+test('Installed Dolphin Flatpak is configured even when the unrelated native directory scan hits its limit',t=>{
+ const {home,put,env}=setup(t),exe=put('bin/flatpak');fs.chmodSync(exe,0o755);env.PATH=path.dirname(exe);
+ put('large/one');put('large/two');const run=(_cmd,args)=>args[0]==='list'?'org.DolphinEmu.dolphin-emu':path.join(home,'deployment');
+ const result=discoverEmulators([home],{platform:'linux',limit:1,flatpakOptions:{env,run}});
+ assert.equal(result.limited,true);assert.equal(result.profiles.dolphin.selected,'flatpak:org.DolphinEmu.dolphin-emu');
+ const config={launchers:{dolphin:{exe:put('.local/share/applications/org.DolphinEmu.dolphin-emu.desktop')}}};assert.ok(applyDiscovery(config,result).includes('dolphin'));assert.equal(config.launchers.dolphin.exe,exe);assert.equal(config.launchers.dolphin.flatpakId,'org.DolphinEmu.dolphin-emu');
+});
+
+test('Linux emulator discovery avoids rescanning the system tree for configured Flatpak launchers',{skip:process.platform!=='linux'},t=>{
+ const {home,env}=setup(t);const roots=defaultDiscoveryRoots({launchers:{dolphin:{exe:'/usr/bin/flatpak',flatpakId:'org.DolphinEmu.dolphin-emu'},ps3:{exe:'/usr/bin/rpcs3'}}},{env,home,appRoot:home});assert.ok(!roots.includes('/usr'));assert.ok(roots.includes('/usr/bin'));
 });

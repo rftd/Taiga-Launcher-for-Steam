@@ -95,7 +95,6 @@ function renderFeaturedAchievementHtml(item: LocalAchievementItem, allowGlow = t
 /** Reserve the native zero-row geometry while progress is unknown. No Store
  * highlight is presented as locked, and no invented 0/N or percentage appears. */
 export function renderPendingAchievementSidebarHtml(total: number): string {
-	if (!(total > 0)) return '';
 	return `<div class="gdl-la-summary" data-gdl-achievement-pending="1" data-gdl-achievement-total="${Math.floor(total)}" aria-busy="true">
 		<div class="gdl-la-header"><div class="gdl-la-unlocked" role="status">${escapeHtml(gdlText('achievement_path_loading', 'Loading…'))}</div><div class="gdl-la-progress-track" aria-hidden="true"></div></div>
 		<div class="gdl-la-body"><div class="gdl-la-locked-label" aria-hidden="true">&nbsp;</div><div class="gdl-la-icon-row" aria-hidden="true" style="height:48px"></div><div class="gdl-la-view">${escapeHtml(gdlText('view_all_achievements', 'View all achievements'))}</div></div>

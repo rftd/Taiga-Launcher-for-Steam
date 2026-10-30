@@ -102,7 +102,9 @@ export function renderLinkedSidebarCore(
 	// A confirmed local snapshot knows its real total even when Store metadata
 	// is absent, stale or no longer advertises achievements for this game.
 	const total = cachedAchievements?.total || options.data.achievements?.total || 0;
-	if (total <= 0) { ownedSection(doc, order, 'gdl-achievements-section')?.remove(); return; }
+	// Keep a loading section until local data arrives: virtual/emulator games often
+	// have no Store total, and late updates paint this existing section.
+
 	ensureAchievementSidebarStyles(doc);
 	ensureAchievementModalStyles(doc);
 	const early = getOwnedAchievementSidebar(doc, options.steamAppId, options.shortcutAppId)

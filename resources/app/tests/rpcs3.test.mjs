@@ -66,3 +66,22 @@ test('Achievement manager discovers RPCS3 Flatpak automatically and converts PS3
  const manager=new AchievementProviderManager({config:()=>({language:'en'}),dir:path.join(home,'taiga'),env:{HOME:home},providers:{}});
  const data=await manager.get(game);assert.equal(data.provider,'rpcs3');assert.equal(data.status,'ok');assert.equal(data.unlocked,1);assert.equal(data.achievements[0].date,1700000000);
 });
+
+test('RPCS3 matches a localized Uncharted title only when no NPWR identity is available',t=>{
+ const home=temp(t),root=path.join(home,'RPCS3'),folder=install(root,'NPWR01234_00',"UNCHARTED 2: Among Thieves");
+ const localized='<trophyconf><title-name>UNCHARTED 2: O Reino dos Ladrões</title-name><trophy id="000" ttype="B"><name>Primeiro troféu</name><detail>Início</detail></trophy></trophyconf>';
+ write(folder,'TROP_17.SFM',localized);
+ const game={profile:'ps3',title:'UNCHARTED 2: O Reino dos Ladrões',internalTitle:'Different library name'};
+ const data=readRPCS3(game,{rpcs3Root:root,language:'pt-BR'},path.join(home,'taiga'));assert.equal(data.status,'ok');assert.equal(data.unlocked,1);
+ assert.equal(readRPCS3({...game,title:"Uncharted: Drake's Fortune",internalTitle:''},{rpcs3Root:root},path.join(home,'taiga')).status,'unmapped');
+});
+test('RPCS3 trophy data is delivered unchanged through the Steam achievement backend',async t=>{
+ const {createNglBackend,virtualAppIdFor}=await import('../lib/ngl/backend.mjs');
+ const home=temp(t),root=path.join(home,'RPCS3');install(root,'NPWR01234_00',"Demon's Souls");
+ const game={...gameAt(path.join(home,'game')),uuid:'ps3-demons-souls',bindings:{1:3000000001}};
+ const manager=new AchievementProviderManager({config:()=>({language:'en',rpcs3Root:root}),dir:path.join(home,'taiga'),providers:{}});
+ const host={dataDir:path.join(home,'taiga'),config:()=>({language:'en',account:'1'}),games:()=>[game],shortcutGame:id=>Number(id)===3000000001?game:null,virtualGame:()=>game,steamAppIdOf:()=>null,achievements:g=>manager.get(g),cachedAchievements:g=>manager.cached(g),artUrl:s=>s};
+ const backend=createNglBackend(host),id=virtualAppIdFor(game.uuid);
+ const response=JSON.parse(await backend.call('fetch_local_achievement_data',{request_json:JSON.stringify({steam_app_id:String(id),state_app_id:'3000000001'})}));
+ assert.equal(response.found,true);assert.equal(response.total,2);assert.equal(response.unlocked,1);assert.equal(response.achievements[0].earned,true);assert.equal(response.state_appid,'3000000001');
+});
