@@ -25,7 +25,11 @@ export function parseRALines(text, state = {gameId: null}) {
 
 // Arquivos de log conhecidos dos emuladores com RetroAchievements.
 export function raLogCandidates(config = {}, env = process.env) {
- const docs = env.USERPROFILE ? path.join(env.USERPROFILE, 'Documents') : '', out = [];
+ const home=env.HOME||env.USERPROFILE||'',xdg=env.XDG_CONFIG_HOME||path.join(home,'.config'),data=env.XDG_DATA_HOME||path.join(home,'.local/share'),flat=path.join(home,'.var/app');
+ const docs = home ? path.join(home, 'Documents') : '', out = [];
+ for(const base of [path.join(xdg,'retroarch'),path.join(flat,'org.libretro.RetroArch/config/retroarch')])out.push(path.join(base,'logs/retroarch.log'));
+ for(const base of [path.join(data,'dolphin-emu'),path.join(flat,'org.DolphinEmu.dolphin-emu/data/dolphin-emu')])out.push(path.join(base,'Logs/dolphin.log'));
+ for(const base of [path.join(xdg,'PCSX2'),path.join(flat,'net.pcsx2.PCSX2/config/PCSX2')])out.push(path.join(base,'logs/emulog.txt'));
  const add = (...p) => { if (p.every(Boolean)) out.push(path.join(...p)); };
  const exe = key => config.launchers?.[key]?.exe ? path.dirname(config.launchers[key].exe) : '';
  add(exe('retroarch'), 'logs', 'retroarch.log'); add(env.APPDATA, 'RetroArch', 'logs', 'retroarch.log'); add('C:\\RetroArch-Win64', 'logs', 'retroarch.log');

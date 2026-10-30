@@ -1067,7 +1067,7 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
      // Achados soltos pela varredura só entram com prova no conteúdo (cabeçalho) ou dentro de pasta de plataforma.
      if(sweptOnly.size)inspected.items=inspected.items.filter(i=>!sweptOnly.has(windowsPath(i.path))||['header','folder'].includes(i.platformSource));
      // Busca automática: só jogos de emulador (o arquivo prova o jogo). Jogos de PC vêm das lojas ou da Pasta de atalhos.
-     if(discovering)inspected.items=inspected.items.filter(i=>i.profile!=='pc'&&!/\.(exe|bat|cmd|lnk)$/i.test(i.path));
+     if(discovering)inspected.items=inspected.items.filter(i=>(i.profile!=='pc'||i.platformKey==='linux'&&discovered.folders.some(f=>f.sources.includes('pc')&&insideDir(i.path,f.path)))&&!/\.(exe|bat|cmd|lnk)$/i.test(i.path));
      // Busca de um emulador só (aba Emuladores): só os jogos que ele abre.
      if(body.profile&&REGISTRY_PROFILES[body.profile]){const pf=REGISTRY_PROFILES[body.profile],plats=pf.platforms||[pf.platform];inspected.items=inspected.items.filter(i=>i.profile===body.profile||plats.includes(i.platformName));}
      if(pickedStores?.length)inspected.items=inspected.items.map(i=>{const lp=String(i.path).toLowerCase(),st=pickedStores.find(x=>x.path.toLowerCase()===lp)||pickedStores.find(x=>x.store==='xbox'&&x.root&&lp.startsWith(String(x.root).toLowerCase().replace(/[\\/]+$/,'')+path.sep));return st?storeInfo(i,st):i;});

@@ -25,7 +25,11 @@ function settings(id,exe,location){return {candidate:'flatpak:'+id,profile:FLATP
 export function discoverFlatpakEmulators({env=process.env,platform=process.platform,run=execFileSync}={}){
  if(platform!=='linux')return [];
  const exe=command(env);if(!exe)return [];
- let ids;try{ids=query(run,exe,['list','--app','--columns=application'],env).split(/\r?\n/);}catch{return [];}
+ let ids=[];try{ids=query(run,exe,['list','--app','--columns=application'],env).split(/\r?\n/).map(id=>id.trim());}catch{}
+ const home=env.HOME||env.USERPROFILE||os.homedir();
+ const dirs=[path.join(env.XDG_DATA_HOME||path.join(home,'.local/share'),'applications'),path.join(home,'.local/share/flatpak/exports/share/applications'),'/var/lib/flatpak/exports/share/applications',...String(env.XDG_DATA_DIRS||'').split(path.delimiter).filter(Boolean).map(d=>path.join(d,'applications'))];
+ const exported=new Set();for(const dir of dirs)try{for(const name of fs.readdirSync(dir))if(name.endsWith('.desktop')&&FLATPAK_EMULATORS[name.slice(0,-8)])exported.add(name.slice(0,-8));}catch{}
+ for(const id of exported)if(!ids.includes(id))try{query(run,exe,['info','--show-location',id],env);ids.push(id);}catch{}
  return [...new Set(ids)].filter(id=>FLATPAK_EMULATORS[id]).map(id=>{
   let location='';try{location=query(run,exe,['info','--show-location',id],env);}catch{}
   return settings(id,exe,location);

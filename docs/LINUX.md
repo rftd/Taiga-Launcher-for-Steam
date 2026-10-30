@@ -113,3 +113,17 @@ por uma instalação nativa ou Flatpak na próxima busca.
 As sessões RetroAchievements do RetroArch e do Dolphin são lidas também dos diretórios
 XDG e Flatpak. A conta precisa estar conectada no emulador e o jogo identificado no
 RetroAchievements. O token não aparece na interface.
+
+A descoberta de jogos também lê as playlists do RetroArch e as configurações de
+Dolphin, RPCS3, PCSX2, DuckStation e PPSSPP nas pastas XDG e Flatpak. Ela considera
+`HOME`, `~/roms` e `~/Emulation/roms`; jogos nativos nas subpastas de `~/Games` ou
+`~/Jogos` podem aparecer como candidatos. Pastas externas continuam podendo ser
+adicionadas nas configurações. AppImages de emuladores podem ter a versão no nome.
+
+Se `flatpak list` falhar, a busca também verifica os atalhos exportados em
+`~/.local/share/applications`, nos diretórios de exportação do Flatpak e nas pastas
+XDG. Ela confirma a instalação com `flatpak info`, sem executar o conteúdo dos atalhos.
+
+Falhas de consulta ao RetroAchievements podem ser tentadas novamente e são exibidas
+na tela de conquistas. Uma correspondência ausente não é tratada como um jogo com
+zero conquistas; confira a plataforma e o nome do jogo quando isso ocorrer.

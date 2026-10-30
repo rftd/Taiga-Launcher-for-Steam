@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const ROM_FOLDERS = ['Roms', 'ROMs', 'roms', 'ROMS', 'Emulation\\roms', 'Emulation\\ROMs', 'RetroBat\\roms', 'Jogos\\Roms', 'Games\\Roms', 'Games\\ROMs', 'Emuladores\\Roms', 'Emuladores\\Jogos', 'Emulators\\Roms', 'Emulators\\Games', 'ISOs', 'Isos', 'PS2\\ISOs', 'PSP\\ISO', 'Jogos PSP', 'Jogos PS2', 'Jogos PS1'];
-const HOME_FOLDERS = ['Roms', 'ROMs', 'Emulation\\roms', 'Documents\\Roms', 'Documents\\ROMs', 'Documents\\ISOs', 'Documentos\\Roms', 'Games\\Roms', 'Jogos\\Roms'];
+const HOME_FOLDERS = ['roms','Roms', 'ROMs', 'Emulation\\roms', 'Documents\\Roms', 'Documents\\ROMs', 'Documents\\ISOs', 'Documentos\\Roms', 'Games\\Roms', 'Jogos\\Roms'];
 // Pastas comuns de jogos de PC instalados fora de lojas: cada subpasta é tratada como um jogo separado.
 const PC_FOLDERS = ['Games', 'Jogos', 'Juegos', 'Spiele', 'Jeux'];
 const SKIP = /^(windows|program files( \(x86\))?|programdata|\$recycle\.bin|system volume information|steamlibrary|steamapps|appdata|recovery|perflogs|msocache)$/i;
@@ -31,38 +31,39 @@ export function iniSections(text) {
  return out;
 }
 const unquote = s => String(s || '').trim().replace(/^"(.*)"$/, '$1').replace(/\\\\/g, '\\');
-const fileDir = p => { const clean = String(p || '').split('#')[0]; return clean ? path.win32.dirname(clean) : ''; };
+const fileDir = p => { const clean = String(p || '').split('#')[0]; return clean ? (/^[a-z]:[\\/]|^\\\\/i.test(clean)?path.win32:path.posix).dirname(clean) : ''; };
 
 // Pastas de jogos configuradas em cada emulador. `dirs` traz as pastas onde o emulador foi encontrado.
 export function emulatorGameFolders({launchers = {}, emulator = '', env = process.env, io = defaults} = {}) {
  const out = [], add = (p, source) => { p = unquote(p); if (p && /^(?:[a-z]:[\\/]|\\\\|\/)/i.test(p)) out.push({path: p.replace(/\//g, path.sep === '\\' ? '\\' : '/'), source}); };
- const docs = env.USERPROFILE ? path.join(env.USERPROFILE, 'Documents') : '';
+ const home=env.HOME||env.USERPROFILE||'',xdg=env.XDG_CONFIG_HOME||path.join(home,'.config'),data=env.XDG_DATA_HOME||path.join(home,'.local/share'),flat=path.join(home,'.var/app');
+ const docs = home ? path.join(home, 'Documents') : '';
  const exeDir = key => launchers[key]?.exe ? path.dirname(launchers[key].exe) : '';
  const j = (...p) => p.every(Boolean) ? path.join(...p) : '';
  // RetroArch: listas de reprodução (.lpl) guardam o caminho de cada jogo já escaneado.
- for (const base of [exeDir('retroarch'), j(env.APPDATA, 'RetroArch'), 'C:\\RetroArch-Win64', 'C:\\RetroArch']) {
+ for (const base of [exeDir('retroarch'), j(env.APPDATA, 'RetroArch'), 'C:\\RetroArch-Win64', 'C:\\RetroArch', path.join(xdg,'retroarch'),path.join(flat,'org.libretro.RetroArch/config/retroarch')]) {
   const dir = j(base, 'playlists'); if (!dir || !io.exists(dir)) continue;
   for (const f of io.list(dir)) if (!f.dir && /\.lpl$/i.test(f.name)) { try { for (const it of JSON.parse(io.read(path.join(dir, f.name)) || '{}').items || []) add(fileDir(it.path), 'RetroArch'); } catch {} }
  }
  // PCSX2 e DuckStation: [GameList] Paths / RecursivePaths.
- for (const [file, source] of [[j(docs, 'PCSX2', 'inis', 'PCSX2.ini'), 'PCSX2'], [j(exeDir('ps2'), 'inis', 'PCSX2.ini'), 'PCSX2'], [j(docs, 'DuckStation', 'settings.ini'), 'DuckStation'], [j(exeDir('ps1'), 'settings.ini'), 'DuckStation'], [j(env.LOCALAPPDATA, 'DuckStation', 'settings.ini'), 'DuckStation']]) {
+ for (const [file, source] of [[j(xdg,'PCSX2/inis/PCSX2.ini'),'PCSX2'],[j(flat,'net.pcsx2.PCSX2/config/PCSX2/inis/PCSX2.ini'),'PCSX2'],[j(xdg,'duckstation/settings.ini'),'DuckStation'],[j(flat,'org.duckstation.DuckStation/config/duckstation/settings.ini'),'DuckStation'],[j(docs, 'PCSX2', 'inis', 'PCSX2.ini'), 'PCSX2'], [j(exeDir('ps2'), 'inis', 'PCSX2.ini'), 'PCSX2'], [j(docs, 'DuckStation', 'settings.ini'), 'DuckStation'], [j(exeDir('ps1'), 'settings.ini'), 'DuckStation'], [j(env.LOCALAPPDATA, 'DuckStation', 'settings.ini'), 'DuckStation']]) {
   if (!file) continue; const ini = iniSections(io.read(file));
   for (const [k, v] of ini.gamelist || []) if (/^(recursive)?paths$/i.test(k)) add(v, source);
  }
  // PPSSPP: pasta atual do navegador de jogos, recentes e pastas fixadas.
  const pspDir = exeDir('psp') || (emulator ? path.dirname(emulator) : '');
- for (const file of [j(pspDir, 'memstick', 'PSP', 'SYSTEM', 'ppsspp.ini'), j(docs, 'PPSSPP', 'PSP', 'SYSTEM', 'ppsspp.ini')]) {
+ for (const file of [j(xdg,'ppsspp/PSP/SYSTEM/ppsspp.ini'),j(flat,'org.ppsspp.PPSSPP/config/ppsspp/PSP/SYSTEM/ppsspp.ini'),j(pspDir, 'memstick', 'PSP', 'SYSTEM', 'ppsspp.ini'), j(docs, 'PPSSPP', 'PSP', 'SYSTEM', 'ppsspp.ini')]) {
   if (!file) continue; const ini = iniSections(io.read(file));
   for (const [k, v] of ini.general || []) if (/^currentdirectory$/i.test(k)) add(v, 'PPSSPP');
   for (const [k, v] of ini.recent || []) if (/^filename\d+$/i.test(k)) add(fileDir(v), 'PPSSPP');
   for (const [k, v] of ini.pinnedpaths || []) if (/^path\d+$/i.test(k)) add(v, 'PPSSPP');
  }
  // Dolphin: ISOPath0..N.
- for (const file of [j(env.APPDATA, 'Dolphin Emulator', 'Config', 'Dolphin.ini'), j(docs, 'Dolphin Emulator', 'Config', 'Dolphin.ini'), j(exeDir('dolphin'), 'User', 'Config', 'Dolphin.ini')]) {
+ for (const file of [j(xdg,'dolphin-emu/Dolphin.ini'),j(flat,'org.DolphinEmu.dolphin-emu/config/dolphin-emu/Dolphin.ini'),j(data,'dolphin-emu/Config/Dolphin.ini'),j(flat,'org.DolphinEmu.dolphin-emu/data/dolphin-emu/Config/Dolphin.ini'),j(env.APPDATA, 'Dolphin Emulator', 'Config', 'Dolphin.ini'), j(docs, 'Dolphin Emulator', 'Config', 'Dolphin.ini'), j(exeDir('dolphin'), 'User', 'Config', 'Dolphin.ini')]) {
   if (!file) continue; for (const [k, v] of iniSections(io.read(file)).general || []) if (/^isopath\d+$/i.test(k)) add(v, 'Dolphin');
  }
  // RPCS3: games.yml lista cada jogo instalado (SERIAL: caminho).
- for (const file of [j(exeDir('ps3'), 'config', 'games.yml'), j(exeDir('ps3'), 'games.yml')]) {
+ for (const file of [j(xdg,'rpcs3/games.yml'),j(flat,'net.rpcs3.RPCS3/config/rpcs3/games.yml'),j(exeDir('ps3'), 'config', 'games.yml'), j(exeDir('ps3'), 'games.yml')]) {
   if (!file) continue; for (const m of io.read(file).matchAll(/^\s*[A-Z]{4}\d{5}\s*:\s*(.+?)\s*$/gm)) add(m[1].replace(/^["']|["']$/g, ''), 'RPCS3');
  }
  // yuzu e derivados (suyu, sudachi, citron, eden): qt-config.ini, [UI] Paths\gamedirs\N\path.
@@ -96,7 +97,7 @@ export function emulatorGameFolders({launchers = {}, emulator = '', env = proces
 
 // Frontends que organizam ROMs em pastas por sistema.
 export function frontendFolders({env = process.env, drives = [], io = defaults} = {}) {
- const out = [], home = env.USERPROFILE || '';
+ const out = [], home = env.USERPROFILE || env.HOME || '';
  const add = (p, source) => { if (p && io.exists(p)) out.push({path: p, source}); };
  for (const d of drives) { add(path.join(d, 'RetroBat', 'roms'), 'RetroBat'); add(path.join(d, 'Emulation', 'roms'), 'EmuDeck'); }
  if (home) add(path.join(home, 'Emulation', 'roms'), 'EmuDeck');
@@ -113,7 +114,7 @@ export function frontendFolders({env = process.env, drives = [], io = defaults} 
 
 // Pastas de ROMs com nomes comuns em cada unidade e na pasta do usuário.
 export function commonFolders({env = process.env, drives = [], io = defaults} = {}) {
- const out = [], home = env.USERPROFILE || '';
+ const out = [], home = env.USERPROFILE || env.HOME || '';
  for (const d of drives) for (const rel of ROM_FOLDERS) { const p = path.join(d, ...rel.split('\\')); if (io.exists(p)) out.push({path: p, source: 'roms'}); }
  if (home) for (const rel of HOME_FOLDERS) { const p = path.join(home, ...rel.split('\\')); if (io.exists(p)) out.push({path: p, source: 'roms'}); }
  return out;
@@ -122,7 +123,7 @@ export function commonFolders({env = process.env, drives = [], io = defaults} = 
 // Jogos de PC fora das lojas: cada subpasta de \Games, \Jogos... vira uma busca separada (evita estourar o
 // limite de arquivos de uma pasta inteira). A importação só aceita sozinha quando há prova (AppID, loja).
 export function pcGameFolders({drives = [], env = process.env, io = defaults, max = 200} = {}) {
- const out = [], home = env.USERPROFILE || '';
+ const out = [], home = env.USERPROFILE || env.HOME || '';
  const roots = [...drives.flatMap(d => PC_FOLDERS.map(n => path.join(d, n))), ...(home ? PC_FOLDERS.map(n => path.join(home, n)) : [])];
  for (const root of roots) {
   if (!io.exists(root)) continue;
@@ -156,7 +157,7 @@ export function discoverGameFolders(config = {}, {env = process.env, platform = 
   ...frontendFolders({env, drives: ds, io}),
   ...commonFolders({env, drives: ds, io}),
   ...(config.roots || []).map(p => ({path: p, source: 'saved'})),
- ].filter(f => io.exists(f.path) && !SKIP.test(path.basename(f.path)) && !/^[a-z]:[\\/]?$/i.test(f.path) && path.resolve(f.path) !== path.resolve(env.USERPROFILE || '/__none__'));
+ ].filter(f => io.exists(f.path) && !SKIP.test(path.basename(f.path)) && !/^[a-z]:[\\/]?$/i.test(f.path) && path.resolve(f.path) !== path.resolve(env.USERPROFILE || env.HOME || '/__none__'));
  const roms = collapseFolders(found, {caseInsensitive: platform === 'win32'});
  const pc = collapseFolders(pcGameFolders({drives: ds, env, io}), {caseInsensitive: platform === 'win32'}).filter(p => !roms.some(r => (p.path + path.sep).toLowerCase().startsWith((r.path + path.sep).toLowerCase())));
  const all = [...roms, ...pc].slice(0, limit);
