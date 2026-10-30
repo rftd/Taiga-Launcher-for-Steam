@@ -47,3 +47,11 @@ test('Upstream RetroArch core metadata and retroarchFirst preference also work w
  assert.ok(retroArchPlatforms(exe,launcher).includes('Sega Game Gear'));
  assert.equal(preferredProfile({profile:'snes9x',platformName:'Super Nintendo Entertainment System'},{preferences:{retroarchFirst:true},launchers:{retroarch:launcher}}),'retroarch');
 });
+
+test('AppImage library and plugin paths are excluded only for native Flatpak subprocesses',async t=>{
+ const {flatpakEnvironment,discoverFlatpakEmulators}=await import('../lib/flatpak-emulators.mjs');const {root,file}=setup(t),exe=file('system/flatpak');fs.chmodSync(exe,0o755);const app=path.join(root,'AppImage');
+ const env={APPDIR:app,PATH:path.join(app,'usr/bin')+path.delimiter+path.dirname(exe),LD_LIBRARY_PATH:path.join(app,'usr/lib')+path.delimiter+path.join(root,'custom-libs'),GIO_EXTRA_MODULES:path.join(app,'usr/lib/gio/modules'),HOME:root};
+ const clean=flatpakEnvironment(env);assert.equal(clean.LD_LIBRARY_PATH,path.join(root,'custom-libs'));assert.equal(clean.GIO_EXTRA_MODULES,undefined);assert.equal(env.GIO_EXTRA_MODULES,path.join(app,'usr/lib/gio/modules'));
+ const issues=[],run=(_cmd,args,opts)=>{assert.equal(opts.env.LD_LIBRARY_PATH,path.join(root,'custom-libs'));assert.equal(opts.env.GIO_EXTRA_MODULES,undefined);if(args[0]==='list')throw Object.assign(Error('exit 127'),{stderr:'flatpak: library fixture failure'});throw Error('not installed');};
+ assert.deepEqual(discoverFlatpakEmulators({env,platform:'linux',run,onError:e=>issues.push(e)}),[]);assert.match(issues[0].message,/library fixture failure/);
+});

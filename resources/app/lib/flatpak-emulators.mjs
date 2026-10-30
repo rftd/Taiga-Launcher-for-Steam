@@ -14,20 +14,27 @@ export const FLATPAK_EMULATORS={
  'net.kuribo64.melonDS':'melonds',
  'org.flycast.Flycast':'flycast',
 };
+// Native Flatpak must not load libraries/plugins bundled inside the launcher AppImage.
+export function flatpakEnvironment(env=process.env){
+ const out={...env};if(!env.APPDIR)return out;const app=path.resolve(env.APPDIR),bundled=v=>v&&(path.resolve(v)===app||path.resolve(v).startsWith(app+path.sep));
+ for(const key of ['PATH','LD_LIBRARY_PATH','GIO_EXTRA_MODULES','GI_TYPELIB_PATH','GTK_PATH','QT_PLUGIN_PATH','QML2_IMPORT_PATH'])if(out[key]){const kept=out[key].split(path.delimiter).filter(v=>!bundled(v));if(kept.length)out[key]=kept.join(path.delimiter);else delete out[key];}
+ for(const key of ['GSETTINGS_SCHEMA_DIR','GDK_PIXBUF_MODULE_FILE'])if(bundled(out[key]))delete out[key];
+ return out;
+}
 function command(env){
- for(const dir of String(env.PATH||'').split(path.delimiter).filter(Boolean)){
+ for(const dir of [...String(env.PATH||'').split(path.delimiter).filter(Boolean),'/usr/bin','/bin']){
   const file=path.join(dir,'flatpak');try{if(!fs.statSync(file).isFile())continue;fs.accessSync(file,fs.constants.X_OK);return file;}catch{}
  }
  return '';
 }
-const query=(run,exe,args,env)=>String(run(exe,args,{encoding:'utf8',timeout:4000,maxBuffer:1024*1024,env,stdio:['ignore','pipe','pipe']})).trim();
+const query=(run,exe,args,env)=>String(run(exe,args,{encoding:'utf8',timeout:4000,maxBuffer:1024*1024,env:flatpakEnvironment(env),stdio:['ignore','pipe','pipe']})).trim();
 function settings(id,exe,location){return {candidate:'flatpak:'+id,profile:FLATPAK_EMULATORS[id],exe,flatpakId:id,flatpakLocation:location};}
-export function discoverFlatpakEmulators({env=process.env,platform=process.platform,run=execFileSync}={}){
+export function discoverFlatpakEmulators({env=process.env,platform=process.platform,run=execFileSync,onError=()=>{}}={}){
  if(platform!=='linux')return [];
- const exe=command(env);if(!exe)return [];
- let ids=[];try{ids=query(run,exe,['list','--app','--columns=application'],env).split(/\r?\n/).map(id=>id.trim());}catch{}
+ const exe=command(flatpakEnvironment(env));if(!exe)return [];
+ let ids=[];try{ids=query(run,exe,['list','--app','--columns=application'],env).split(/\r?\n/).map(id=>id.trim());}catch(e){onError({path:exe,message:String(e.stderr||e.message||e).trim().slice(0,1000)});}
  const home=env.HOME||env.USERPROFILE||os.homedir();
- const dirs=[path.join(env.XDG_DATA_HOME||path.join(home,'.local/share'),'applications'),path.join(home,'.local/share/flatpak/exports/share/applications'),'/var/lib/flatpak/exports/share/applications',...String(env.XDG_DATA_DIRS||'').split(path.delimiter).filter(Boolean).map(d=>path.join(d,'applications'))];
+ const dirs=[path.join(env.XDG_DATA_HOME||path.join(home,'.local/share'),'applications'),path.join(home,'.local/share/flatpak/exports/share/applications'),'/usr/share/applications','/usr/local/share/applications','/var/lib/flatpak/exports/share/applications',...String(env.XDG_DATA_DIRS||'').split(path.delimiter).filter(Boolean).map(d=>path.join(d,'applications'))];
  const exported=new Set();for(const dir of dirs)try{for(const name of fs.readdirSync(dir))if(name.endsWith('.desktop')&&FLATPAK_EMULATORS[name.slice(0,-8)])exported.add(name.slice(0,-8));}catch{}
  for(const id of exported)if(!ids.includes(id))try{query(run,exe,['info','--show-location',id],env);ids.push(id);}catch{}
  return [...new Set(ids)].filter(id=>FLATPAK_EMULATORS[id]).map(id=>{
@@ -39,7 +46,7 @@ export function resolveFlatpakEmulator(candidate,{env=process.env,platform=proce
  if(platform!=='linux')return null;
  const id=candidate.startsWith('flatpak:')?candidate.slice(8):path.basename(candidate).replace(/\.desktop$/,'');
  if(!FLATPAK_EMULATORS[id])return null;
- const exe=command(env);if(!exe)return null;
+ const exe=command(flatpakEnvironment(env));if(!exe)return null;
  try{return settings(id,exe,query(run,exe,['info','--show-location',id],env));}catch{return null;}
 }
 export function flatpakCoreDirectories({home=os.homedir(),env=process.env,flatpakLocation=''}={}){

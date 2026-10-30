@@ -1,3 +1,4 @@
+import {flatpakEnvironment} from './flatpak-emulators.mjs';
 import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import crypto from 'node:crypto';import {spawn,execFile} from 'node:child_process';import {promisify} from 'node:util';import {performance} from 'node:perf_hooks';import {portOf} from './port-trophies.mjs';import {portProfile} from './port-profiles.mjs';
 import {windowsPath} from './vdf.mjs';
 import {json,save} from './files.mjs';import {launchFor} from './games.mjs';
@@ -64,7 +65,7 @@ export class LaunchEngine{
    // saída vai para port-logs/<uuid>.log, lido pelo Taiga Launcher. Só quando o próprio .exe do jogo é aberto.
    const sameExe=path.resolve(launch.exe).toLowerCase()===path.resolve(String(game.path||'')).toLowerCase();
    if(sameExe&&['pc','custom'].includes(game.profile)&&!game.native&&(()=>{try{return !!portOf(game)||portProfile(game)?.achievements==='trophies';}catch{return false;}})()){try{const f=portCaptureFile(this.dir,game.uuid);fs.mkdirSync(path.dirname(f),{recursive:true});fs.writeFileSync(f,'');captureFd=fs.openSync(f,'a');}catch{captureFd=null;}}
-   try{child=this.spawnProcess(launch.exe,args,{cwd,stdio:captureFd!==null?['ignore',captureFd,captureFd]:'ignore',shell:false,windowsHide:false});await new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});}
+   try{child=this.spawnProcess(launch.exe,args,{cwd,...(process.platform==='linux'&&path.basename(launch.exe)==='flatpak'?{env:flatpakEnvironment()}:{}),stdio:captureFd!==null?['ignore',captureFd,captureFd]:'ignore',shell:false,windowsHide:false});await new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});}
    catch(error){
     // O Windows negou a abertura direta: abre pelo Windows (como um clique duplo).
     if(process.platform!=='win32'||!/^(EPERM|EACCES|UNKNOWN|EINVAL|E2BIG)$/.test(String(error?.code||'')))throw error;
