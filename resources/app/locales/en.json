@@ -1109,7 +1109,7 @@
   "itest.page": "Game page loaded in Steam",
   "itest.pageFix": "The page has not loaded yet. Wait a few seconds or use \"Refresh panel\"; if it persists, create a diagnostic.",
   "itest.notification": "Test notification sent",
-  "itest.notificationFix": "Steam did not accept the native notification. Achievements still show as a Windows notification.",
+  "itest.notificationFix": "Steam did not accept the native notification. Taiga Launcher uses a system notification instead when available and allowed.",
   "itest.games": "Games in Steam",
   "itest.gamesFix": "No games have been sent to Steam yet. Use \"Add all\" in the Collection.",
   "rmall.title": "Remove from Steam",

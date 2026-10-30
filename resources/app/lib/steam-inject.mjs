@@ -187,7 +187,11 @@ export class SteamInjector {
  async reloadNow() {
   for (const id of this.sessions.keys()) {
    if (this.kinds.get(id) === 'web') continue;
-   if (this.kinds.get(id) === 'shared' && this.refreshExpression && this.injected.has(id)) { const expr = await this.refreshExpression(); await this.send('Runtime.evaluate', {expression: expr, returnByValue: true}, this.sessions.get(id)).catch(() => {}); continue; }
+   if (this.kinds.get(id) === 'shared' && this.refreshExpression && this.injected.has(id)) {
+    const health = this.health?.shared;
+    const check = health ? await this.send('Runtime.evaluate', {expression: health, returnByValue: true}, this.sessions.get(id)).catch(() => null) : null;
+    if (!health || check?.result?.value === true) { const expr = await this.refreshExpression(); await this.send('Runtime.evaluate', {expression: expr, returnByValue: true}, this.sessions.get(id)).catch(() => {}); continue; }
+   }
    await this.send('Runtime.evaluate', {expression: `delete window.${MARKER};true`}, this.sessions.get(id)).catch(() => {}); this.injected.delete(id); this.schedule(id, 100);
   }
  }

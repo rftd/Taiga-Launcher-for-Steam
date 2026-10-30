@@ -1109,7 +1109,7 @@
   "itest.page": "Página de juegos cargada en Steam",
   "itest.pageFix": "La página aún no cargó. Espera unos segundos o usa \"Actualizar panel\"; si sigue, genera el diagnóstico.",
   "itest.notification": "Notificación de prueba enviada",
-  "itest.notificationFix": "Steam no aceptó la notificación nativa. Los logros aún aparecen como aviso de Windows.",
+  "itest.notificationFix": "Steam no aceptó la notificación nativa. Taiga Launcher usa una notificación del sistema si está disponible y permitida.",
   "itest.games": "Juegos en Steam",
   "itest.gamesFix": "Aún no se envió ningún juego a Steam. Usa \"Añadir todos\" en la Colección.",
   "rmall.title": "Quitar de Steam",

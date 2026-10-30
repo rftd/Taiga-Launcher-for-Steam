@@ -1109,7 +1109,7 @@
   "itest.page": "Spieleseite in Steam geladen",
   "itest.pageFix": "Die Seite ist noch nicht geladen. Warte kurz oder nutze \"Bereich aktualisieren\"; sonst Diagnose erstellen.",
   "itest.notification": "Testbenachrichtigung gesendet",
-  "itest.notificationFix": "Steam hat die native Benachrichtigung nicht angenommen. Erfolge erscheinen weiter als Windows-Hinweis.",
+  "itest.notificationFix": "Steam hat die native Benachrichtigung nicht angenommen. Taiga Launcher verwendet stattdessen eine Systembenachrichtigung, wenn diese verfügbar und erlaubt ist.",
   "itest.games": "Spiele in Steam",
   "itest.gamesFix": "Noch keine Spiele an Steam gesendet. Nutze „Alle hinzufügen“ in der Sammlung.",
   "rmall.title": "Aus Steam entfernen",

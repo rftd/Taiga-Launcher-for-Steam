@@ -1109,7 +1109,7 @@
   "itest.page": "Página dos jogos carregada na Steam",
   "itest.pageFix": "A página ainda não carregou. Espere alguns segundos ou use \"Atualizar painel\"; se continuar, gere o diagnóstico.",
   "itest.notification": "Notificação de teste enviada",
-  "itest.notificationFix": "A Steam não aceitou a notificação nativa. As conquistas ainda aparecem pelo aviso do Windows.",
+  "itest.notificationFix": "A Steam não aceitou a notificação nativa. Se as notificações do sistema estiverem disponíveis e permitidas, o Taiga Launcher usa esse aviso como alternativa.",
   "itest.games": "Jogos na Steam",
   "itest.gamesFix": "Nenhum jogo foi enviado à Steam ainda. Use \"Adicionar todos\" na Coleção.",
   "rmall.title": "Remover da Steam",

@@ -1258,7 +1258,9 @@ export function createApp({dataDir=defaultDataDir(),port=48767,picker=win.pick,l
  // contexto principal já existe mas o React ainda não: carregar nessa hora quebrava o pacote e a página nunca aparecia.
  // Como o Millennium, espera webpack, React, janelas e lojas da Steam ficarem prontos antes de carregar o plugin.
  function nglLoader(bundle,boot){return `;(function(){'use strict';
- if(window.__TAIGA_NGL_LOADER__===2)return;window.__TAIGA_NGL_LOADER__=2;
+ var failed=window.__TAIGA_NGL_STATE__==='error'||window.__TAIGA_NGL_STATE__==='missing';
+ if(window.__TAIGA_NGL_LOADER__===3&&!failed)return;window.__TAIGA_NGL_LOADER__=3;
+ if(failed){delete window.__TAIGA_NGL_MODULE__;window.__TAIGA_NGL_STATE__='waiting';window.__TAIGA_NGL_ERROR__=null;}
  var log=function(m){try{if(typeof window.__taiga_ffi__==='function')window.__taiga_ffi__(JSON.stringify({id:0,method:'fe_log',args:{msg:String(m).slice(0,4000)}}));}catch(e){}};
  // Peças da Steam que o plugin precisa. Versões novas da Steam nem sempre deixam o React (SP_REACT/SP_REACTDOM) como
  // variável global: como o Decky e o Millennium, ele é procurado nos módulos webpack da própria Steam.

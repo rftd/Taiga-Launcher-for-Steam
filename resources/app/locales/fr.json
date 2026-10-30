@@ -1109,7 +1109,7 @@
   "itest.page": "Page des jeux chargée dans Steam",
   "itest.pageFix": "La page n’est pas encore chargée. Attendez quelques secondes ou utilisez \"Actualiser le panneau\" ; sinon, créez un diagnostic.",
   "itest.notification": "Notification de test envoyée",
-  "itest.notificationFix": "Steam n’a pas accepté la notification native. Les succès s’affichent encore via Windows.",
+  "itest.notificationFix": "Steam n’a pas accepté la notification native. Taiga Launcher utilise une notification système si elle est disponible et autorisée.",
   "itest.games": "Jeux dans Steam",
   "itest.gamesFix": "Aucun jeu n’a encore été envoyé à Steam. Utilisez « Tout ajouter » dans la Collection.",
   "rmall.title": "Retirer de Steam",

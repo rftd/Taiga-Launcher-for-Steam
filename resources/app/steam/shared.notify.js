@@ -6,7 +6,16 @@
 (()=>{
  'use strict';
  const TYPE=5,DURATION=5000;let proto=null,storeRef=null,nextId=-7000,active=null;
- function webpackModules(){const chunk=window.webpackChunksteamui||window.webpackChunk;if(!chunk||typeof chunk.push!=='function')return [];let req=null;try{chunk.push([[Symbol('taiga-notify')],{},r=>{req=r;}]);}catch{return [];}const out=[];for(const id of Object.keys(req?.c||{})){const e=req.c[id]?.exports;if(!e)continue;out.push(e);if(typeof e==='object')for(const v of Object.values(e))if(v&&(typeof v==='object'||typeof v==='function'))out.push(v);}return out;}
+ function webpackModules(){
+  const out=[],add=e=>{if(!e)return;out.push(e);if(typeof e==='object')for(const v of Object.values(e))if(v&&(typeof v==='object'||typeof v==='function'))out.push(v);};
+  // O host já resolve módulos nas versões da Steam que não expõem o cache req.c.
+  try{const modules=window.__TAIGA_NGL_HOST__?.modules?.();if(modules?.values)for(const e of modules.values())add(e);}catch{}
+  if(out.length)return out;
+  const chunk=window.__TAIGA_NGL_HOST__?.webpackChunk?.()||window.webpackChunksteamui||window.webpackChunk||Object.keys(window).filter(k=>/^webpackChunk/.test(k)).map(k=>window[k]).find(v=>typeof v?.push==='function');
+  if(!chunk||typeof chunk.push!=='function')return out;let req=null;try{chunk.push([[Symbol('taiga-notify')],{},r=>{req=r;}]);}catch{return out;}
+  for(const id of Object.keys(req?.c||{}))try{add(req.c[id]?.exports);}catch{}
+  return out;
+ }
  function findProto(){if(proto)return proto;for(const c of webpackModules()){try{if(typeof c?.fromObject==='function'&&typeof c?.prototype?.getClassName==='function'&&c.prototype.getClassName.call(c.prototype)==='CClientNotificationAchievement'){proto=c;break;}}catch{}}return proto;}
  function findStore(){if(storeRef)return storeRef;const ok=s=>typeof s?.OnNotification==='function'&&Array.isArray(s.m_rgNotificationToasts)&&Array.isArray(s.m_rgNotificationTray);if(ok(window.NotificationStore))return storeRef=window.NotificationStore;for(const c of webpackModules())if(ok(c))return storeRef=c;return null;}
  function retireTray(store,id){try{for(const group of [...store.m_rgNotificationTray]){const list=group.notifications||[];const i=list.findIndex(n=>n.notificationID===id);if(i<0)continue;list.splice(i,1);if(!list.length)store.m_rgNotificationTray.splice(store.m_rgNotificationTray.indexOf(group),1);}store.m_cbkNotificationTray?.Dispatch?.(store.m_rgNotificationTray);}catch{}}
